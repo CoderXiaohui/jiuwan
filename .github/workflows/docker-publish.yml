@@ -127,6 +127,12 @@ jobs:
           docker push "docker.io/$DOCKERHUB_USERNAME/jiuwan-backend:$IMAGE_TAG"
           docker push "docker.io/$DOCKERHUB_USERNAME/jiuwan-frontend:$IMAGE_TAG"
 
+          # Reuse the tested images after both version tags have been pushed.
+          docker tag "docker.io/$DOCKERHUB_USERNAME/jiuwan-backend:$IMAGE_TAG" "docker.io/$DOCKERHUB_USERNAME/jiuwan-backend:latest"
+          docker tag "docker.io/$DOCKERHUB_USERNAME/jiuwan-frontend:$IMAGE_TAG" "docker.io/$DOCKERHUB_USERNAME/jiuwan-frontend:latest"
+          docker push "docker.io/$DOCKERHUB_USERNAME/jiuwan-backend:latest"
+          docker push "docker.io/$DOCKERHUB_USERNAME/jiuwan-frontend:latest"
+
       # A failed or partial push must not produce a successful publication summary.
       - name: Show published image version
         run: |
@@ -137,6 +143,8 @@ jobs:
             printf '| IMAGE_TAG | %s |\n' "$IMAGE_TAG"
             printf '\n- 前端：docker.io/%s/jiuwan-frontend:%s\n' "$DOCKERHUB_USERNAME" "$IMAGE_TAG"
             printf -- '- 后端：docker.io/%s/jiuwan-backend:%s\n' "$DOCKERHUB_USERNAME" "$IMAGE_TAG"
+            printf -- '- 前端（latest）：docker.io/%s/jiuwan-frontend:latest\n' "$DOCKERHUB_USERNAME"
+            printf -- '- 后端（latest）：docker.io/%s/jiuwan-backend:latest\n' "$DOCKERHUB_USERNAME"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show service logs on failure
