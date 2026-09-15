@@ -1,21 +1,21 @@
 name: Build demo images
+run-name: Build demo images from ${{ github.ref_name }}
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    tags: ['**']
 
 permissions:
   contents: read
 
 concurrency:
-  group: docker-publish-main
+  group: docker-publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   publish:
     name: Test and publish demo images (AMD64)
-    if: github.repository == 'CoderXiaohui/jiuwan' && github.ref == 'refs/heads/main'
+    if: github.repository == 'CoderXiaohui/jiuwan' && startsWith(github.ref, 'refs/tags/') && !github.event.deleted
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -23,7 +23,7 @@ jobs:
         shell: bash
     env:
       DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
-      IMAGE_TAG: sha-${{ github.sha }}
+      IMAGE_TAG: ${{ github.ref_name }}
       COMPOSE_PROJECT_NAME: jiuwan-ci-${{ github.run_id }}-${{ github.run_attempt }}
       FRONTEND_PORT: '18088'
       REDIS_LOCAL_PORT: '26379'
@@ -36,8 +36,13 @@ jobs:
 
       - name: Check publishing configuration
         env:
+          LC_ALL: C
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+            echo "::error::Git tag must be 1-128 ASCII letters, digits, underscores, periods or hyphens, and start with a letter, digit or underscore (e.g. v0.1.0)."
+            exit 1
+          fi
           if [[ ! "$DOCKERHUB_USERNAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
             echo "::error::Set the DOCKERHUB_USERNAME repository variable to your Docker Hub username."
             exit 1
@@ -87,6 +92,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=jiuwan-backend-amd64
           cache-to: type=gha,mode=max,scope=jiuwan-backend-amd64
 
@@ -101,6 +107,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=jiuwan-frontend-amd64
           cache-to: type=gha,mode=max,scope=jiuwan-frontend-amd64
 
