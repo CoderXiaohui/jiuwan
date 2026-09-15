@@ -2,15 +2,21 @@
 
 本文包含酒玩的部署、本地开发、架构与接口说明。项目介绍和玩法概览见 [README](../README.md)。
 
+部署章节：[从源码构建](#从源码构建) · [更新与回退](#更新与回退) · [存储模式](#存储模式)。
+
 ## Docker 部署
 
-需要 Docker Engine / Docker Desktop 与 Compose v2。在项目根目录执行（默认 Redis 模式）：
+需要 Docker Engine / Docker Desktop 与支持 `--wait` 的 Compose v2 或更新版本。根目录的 `docker-compose.yaml` 拉取 `latest` 前后端镜像，使用 Redis 保存房间。
+
+发布镜像支持 **Linux AMD64（x86_64）**。ARM 设备、修改过源码或需要纯内存模式时，使用下文的 [源码构建配置](#从源码构建)。
+
+在项目根目录执行：
 
 ```bash
-docker compose up -d --build
+docker compose up -d --wait --wait-timeout 180
 ```
 
-首次构建会下载 Java、Node、Maven 依赖。完成后打开 **http://localhost:8088**。
+首次启动会下载镜像，无需安装 Java、Node.js 或自行构建。完成后打开 **http://localhost:8088**。
 
 ```bash
 docker compose ps                 # 三个服务应为 healthy
@@ -18,7 +24,57 @@ docker compose logs -f backend    # 后端日志
 docker compose down              # 停止；保留 Redis 数据卷
 ```
 
-已有镜像后可直接 `docker compose up -d`。修改代码后使用 `--build`。
+### 部署配置
+
+部署参数已直接写入根目录 `docker-compose.yaml`，无需创建 `.env` 文件。需要修改端口、镜像版本或来源地址时，编辑该文件中的对应配置：
+
+| 配置位置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `services.backend.image` | `docker.io/deng278/jiuwan-backend:latest` | 后端镜像地址与标签 |
+| `services.frontend.image` | `docker.io/deng278/jiuwan-frontend:latest` | 前端镜像地址与标签 |
+| `services.frontend.ports` | `8088:80` | 网站在宿主机上的访问端口为 8088 |
+| `services.backend.environment.ALLOWED_ORIGINS` | `http://localhost:8088,http://127.0.0.1:8088` | 额外允许的跨域来源，逗号分隔 |
+
+发布镜像已完成构建，根目录配置只使用 `image`。本地代码修改需要使用源码构建配置才会进入镜像。
+
+### 更新与回退
+
+先记录当前镜像版本并保留现有配置。保持 `latest` 标签可拉取更新；需要指定版本时，在根目录 `docker-compose.yaml` 中将前后端 `image` 的标签同时改为相同的已发布版本，例如 `v0.1.0`。然后执行下面一组命令；任何一步失败都会停止后续操作：
+
+```bash
+docker compose pull backend frontend &&
+docker compose up -d --no-build --wait --wait-timeout 180 redis backend &&
+docker compose up -d --no-build --no-deps --force-recreate --wait --wait-timeout 60 frontend
+```
+
+后端健康后重新创建前端，使 Nginx 解析更新后的后端地址。更新期间连接会短暂中断，完成后检查服务健康状态，并通过浏览器验证游戏和重连。
+
+回退时，将前后端 `image` 的标签同时改回上一成功版本，并使用相应的部署配置执行同一组命令。回退只切换应用镜像，不会还原 Redis 数据，旧版本须能读取当前数据格式。
+
+项目名固定为 `jiuwan`，Redis 数据卷为 `jiuwan_redis-data`。已有部署继续使用原项目名和数据卷；停止或更新时不要加 `down -v`，以免删除房间数据。
+
+## 从源码构建
+
+源码构建配置位于 `docker/`，Dockerfile 保留在 `backend/` 和 `frontend/` 中。它们使用本机默认架构构建，不依赖已发布的应用镜像。首次构建会下载 Java、Node、Maven 依赖。
+
+从项目根目录进入 `docker/`，构建并启动 Redis 模式：
+
+```bash
+cd docker
+docker compose -f docker-compose.build.yaml up -d --build --wait --wait-timeout 180
+```
+
+需要定制构建运行配置时，在 `docker/` 中复制 `.env.example` 为 `.env`，再编辑端口、来源或内存容量。源码构建使用 `docker/.env`。若从项目根目录调用构建配置，通过 `--env-file docker/.env` 明确指定构建环境文件。
+
+后续管理也在 `docker/` 中使用同一配置：
+
+```bash
+docker compose -f docker-compose.build.yaml ps
+docker compose -f docker-compose.build.yaml logs -f backend
+docker compose -f docker-compose.build.yaml down
+```
+
+修改源码后再次执行带 `--build` 的启动命令。已有的源码构建部署也通过这份配置管理。
 
 ### 存储模式
 
@@ -27,31 +83,32 @@ docker compose down              # 停止；保留 Redis 数据卷
 | `redis`（默认） | 前端、后端、Redis | 可从 Redis 快照恢复未过期房间 | 长期运行 |
 | `memory` | 前端、后端 | 所有房间、身份及本局状态清空 | 临时聚会、本地开发 |
 
-无 Redis 部署使用独立 Compose 文件，**不与默认文件叠加**：
+无 Redis 的源码构建使用独立 Compose 文件，**不与其他文件叠加**。在 `docker/` 目录执行：
 
 ```bash
-docker compose -f docker-compose.memory.yml up -d --build
-docker compose -f docker-compose.memory.yml ps              # 两个服务应为 healthy
-docker compose -f docker-compose.memory.yml logs -f backend
-docker compose -f docker-compose.memory.yml down
+docker compose -f docker-compose.build.memory.yaml up -d --build --wait --wait-timeout 180
+docker compose -f docker-compose.build.memory.yaml ps              # 两个服务应为 healthy
+docker compose -f docker-compose.build.memory.yaml logs -f backend
+docker compose -f docker-compose.build.memory.yaml down
 ```
 
 两种模式使用相同的访问端口和游戏协议，均支持后端持续运行期间的页面刷新与断网重连。内存模式不会创建 Redis 客户端，也不会执行 Redis 健康探测。Redis 模式连接失败时仍报错，不自动切换为内存。
 
-同一部署切换模式时，先用**原来的 Compose 文件**执行 `down`，再用目标文件执行 `up -d --build`。例如从默认 Redis 切到内存：
+这些配置使用相同项目名和网站端口，不能在同一项目中同时启动两种模式。切换时，先用**原来的 Compose 文件**执行 `down`，再启动目标配置。例如从默认镜像部署切换到内存源码构建，以下命令从项目根目录执行：
 
 ```bash
-docker compose down
-docker compose -f docker-compose.memory.yml up -d --build
+docker compose down &&
+cd docker &&
+docker compose -f docker-compose.build.memory.yaml up -d --build --wait --wait-timeout 180
 ```
 
 切换会断开当前连接，**两种存储之间不迁移房间数据**。`down` 不加 `-v` 会保留 Redis 数据卷；切回 Redis 时可能恢复其中尚未过期的旧房间。内存模式停止后，原内存房间无法恢复。
 
 直接运行 Java / Maven 时用 `STORAGE_MODE=memory` 或 `STORAGE_MODE=redis` 选择，默认 `redis`；也支持 Spring 属性 `jiuwan.storage.mode`。不支持的模式值会使启动失败。Docker 的模式由所选 Compose 文件固定，修改 `.env` 中的 `STORAGE_MODE` 不会切换 Compose 服务。
 
-内存模式默认最多保存 **1000 个未过期房间**（包括关闭后保留的房间），可用环境变量 `MEMORY_MAX_ROOMS` 或 Spring 属性 `jiuwan.storage.memory-max-rooms` 配置正整数。Docker 可在 `.env` 中设置 `MEMORY_MAX_ROOMS=500`。达到上限时拒绝新建，返回 HTTP 503 / `SERVICE_UNAVAILABLE`，已有房间仍可继续操作，不会被驱逐。此上限控制房间数，不代表固定内存字节数。
+内存模式默认最多保存 **1000 个未过期房间**（包括关闭后保留的房间），可用环境变量 `MEMORY_MAX_ROOMS` 或 Spring 属性 `jiuwan.storage.memory-max-rooms` 配置正整数。Docker 源码构建可在 `docker/.env` 中设置 `MEMORY_MAX_ROOMS=500`。达到上限时拒绝新建，返回 HTTP 503 / `SERVICE_UNAVAILABLE`，已有房间仍可继续操作，不会被驱逐。此上限控制房间数，不代表固定内存字节数。
 
-### 两台手机一起玩
+## 两台手机一起玩
 
 1. 手机和运行项目的电脑连接同一个 Wi-Fi。
 2. 查看电脑局域网 IP，例如 `192.168.1.23`。
@@ -69,7 +126,7 @@ LAN_HOST=192.168.1.23 node scripts/lan-proxy.mjs
 
 Nginx 转发原始 Host，WebSocket 支持同源访问，所以同一入口的局域网地址无需逐台加入白名单。跨域入口可用 `ALLOWED_ORIGINS` 指定，逗号分隔，不使用通配符。手机通过 HTTP 开发环境也能生成请求 ID、复制邀请信息；安装 PWA / Service Worker 需要 HTTPS 或 localhost。
 
-默认端口：前端 8088，Redis 仅本机 `127.0.0.1:16379`；Docker 后端不向宿主机暴露端口。可复制 `.env.example` 为 `.env` 修改配置。上线时在入口配置 HTTPS。
+默认网站端口为 8088。根目录镜像部署不向宿主机暴露后端和 Redis；源码构建的 Redis 模式额外提供本机调试端口 `127.0.0.1:16379`，后端仍不向宿主机暴露端口。镜像部署直接编辑根目录 `docker-compose.yaml`；源码构建通过 `docker/.env` 调整配置。公网使用时可在入口接入 HTTPS。
 
 ## 技术架构
 
@@ -123,8 +180,11 @@ jiuwan/
 │   └── Dockerfile
 ├── docs/                    开发部署、游戏规则、协议与验证记录
 ├── scripts/                 真实协议检查、可选的局域网入口
-├── docker-compose.yml
-├── docker-compose.memory.yml
+├── docker/
+│   ├── docker-compose.build.yaml         从源码构建，Redis 模式
+│   ├── docker-compose.build.memory.yaml  从源码构建，内存模式
+│   └── .env.example                      源码构建配置样例
+├── docker-compose.yaml      拉取发布镜像，Redis 模式
 └── README.md
 ```
 
@@ -135,8 +195,10 @@ jiuwan/
 ### 1. 启动 Redis（内存模式跳过）
 
 ```bash
-docker compose up -d redis
+docker compose --env-file docker/.env.example -f docker/docker-compose.build.yaml up -d redis
 ```
+
+以上命令在项目根目录执行，使用构建配置中的本机 Redis 调试端口。若已创建并修改 `docker/.env`，将 `--env-file` 的值换成 `docker/.env`，后端的 `REDIS_PORT` 也使用对应端口。
 
 ### 2. 启动后端
 

@@ -19,12 +19,11 @@
   炸金花 · 大的喝小的喝 · 匿名投票 · 真心话 / 大冒险 · 幸运轮盘 · 摇骰子 · 默契测试
 </p>
 
-<p align="center">
-  <a href="#有什么好玩的">玩法介绍</a> ·
-  <a href="#界面预览">界面预览</a> ·
-  <a href="#自己部署和朋友一起玩">快速开始</a> ·
-  <a href="docs/development.md">开发文档</a>
-</p>
+<div align="center">
+
+[玩法介绍](#有什么好玩的) · [界面预览](#界面预览) · [快速开始](#自己部署和朋友一起玩) · [开发文档](docs/development.md)
+
+</div>
 
 ---
 
@@ -79,18 +78,16 @@
 安装好 Docker 和 Docker Compose v2，下载或克隆本仓库，在项目根目录运行：
 
 ```bash
-docker compose up -d --build
+docker compose up -d --wait --wait-timeout 180
 ```
 
-首次启动需要下载依赖并构建，完成后打开 **[http://localhost:8088](http://localhost:8088)**。
+默认拉取 `latest` 前后端镜像，首次启动会下载镜像，完成后打开 **[http://localhost:8088](http://localhost:8088)**。无需本地安装 Java、Node.js 或配置镜像仓库账号。
 
-默认使用 Redis 保存房间，支持后端重启后恢复。临时聚会也可以选择**纯内存模式，无需 Redis**：
+已发布镜像支持 **Linux AMD64（x86_64）**。ARM 设备或需要修改代码时，可按 [开发文档](docs/development.md) 中的「从源码构建」章节使用本机架构构建镜像。
 
-```bash
-docker compose -f docker-compose.memory.yml up -d --build
-```
+默认使用 Redis 保存房间，支持后端重启后恢复。镜像地址、端口等部署参数已写入根目录 `docker-compose.yaml`，直接运行上面的命令即可；需要调整时编辑该文件。更新与回退步骤见 [开发文档](docs/development.md) 中的「更新与回退」章节。
 
-内存模式支持正常游戏、刷新和断网重连，但**后端重启或更新后房间会清空**。两种模式的切换步骤和容量配置见 [开发与部署](docs/development.md#存储模式)。
+临时聚会也可以通过源码构建选择**纯内存模式，无需 Redis**。它支持正常游戏、刷新和断网重连，但**后端重启或更新后房间会清空**。构建命令、模式切换和容量配置见 [开发文档](docs/development.md) 中的「存储模式」章节。
 
 想让手机一起加入：
 

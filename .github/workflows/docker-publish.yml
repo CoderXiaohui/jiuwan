@@ -52,7 +52,7 @@ jobs:
             exit 1
           fi
           # Reuse the repository's Compose topology with the tested image tags.
-          cat > "$RUNNER_TEMP/jiuwan-ci.yml" <<'YAML'
+          cat > "$RUNNER_TEMP/docker-compose.ci.yaml" <<'YAML'
           services:
             backend:
               image: docker.io/${DOCKERHUB_USERNAME}/jiuwan-backend:${IMAGE_TAG}
@@ -61,7 +61,7 @@ jobs:
               image: docker.io/${DOCKERHUB_USERNAME}/jiuwan-frontend:${IMAGE_TAG}
               platform: linux/amd64
           YAML
-          export COMPOSE_FILE="docker-compose.yml:$RUNNER_TEMP/jiuwan-ci.yml"
+          export COMPOSE_FILE="docker/docker-compose.build.yaml:$RUNNER_TEMP/docker-compose.ci.yaml"
           printf 'COMPOSE_FILE=%s\n' "$COMPOSE_FILE" >> "$GITHUB_ENV"
           docker compose config --quiet
 

@@ -14,7 +14,7 @@ services:
       retries: 10
     restart: unless-stopped
   backend:
-    build: ./backend
+    build: ../backend
     environment:
       STORAGE_MODE: redis
       REDIS_HOST: redis
@@ -27,7 +27,7 @@ services:
       - "8080"
     restart: unless-stopped
   frontend:
-    build: ./frontend
+    build: ../frontend
     ports:
       - "${FRONTEND_PORT:-8088}:80"
     depends_on:

@@ -1,6 +1,28 @@
 # 验证记录
 
-验证日期：2026-09-15。
+验证日期：2026-09-16。
+
+## 本次调整：根目录一键部署使用固定参数（2026-09-16）
+
+- 根目录 `docker-compose.yaml` 直接使用 `deng278` 命名空间的前后端 `latest` 镜像、8088 端口和默认跨域来源，删除根目录 `.env.example`。
+- Compose 配置解析通过；额外设置 `IMAGE_TAG`、`DOCKERHUB_USERNAME`、`FRONTEND_PORT`、`ALLOWED_ORIGINS` 也不会覆盖根目录文件中的固定值。
+- `docker/` 中的 Redis、内存两份源码构建配置使用 `docker/.env.example` 解析通过。
+- README 与开发部署文档同步为直接编辑根目录 Compose 配置，更新和回退通过修改前后端镜像标签完成。
+- 查询 Docker Hub 时，前后端 `latest` 标签均返回 `not found`；需先通过包含 `latest` 发布逻辑的工作流发布镜像，才能使用当前根目录配置启动。
+
+本次验证范围为 Compose 配置解析与文档引用检查。
+
+## 本次调整：镜像部署与源码构建配置分开（2026-09-16）
+
+以下记录对应采用根目录环境变量样例的迁移版本，早于上方的固定参数调整。
+
+- 三份 Compose 配置通过校验：根目录 `docker-compose.yaml` 使用已发布镜像，`docker/` 中两份构建配置分别使用 Redis 和内存；构建上下文仍准确指向前后端目录，源码构建保留本机默认架构。
+- 验证默认部署无需 `.env`，根目录样例与默认配置一致；镜像版本、命名空间和端口可覆盖。验证根目录 `.env` 与 `docker/.env` 按文档中的命令分别读取，两个位置的真实环境文件均被 Git 忽略。
+- 实际拉取 `v0.1.0` 的 AMD64 前后端镜像，以独立项目在 18088 端口启动默认部署；三个服务均为 healthy，真实 REST / WebSocket 检查通过，覆盖权限、私密视图、幂等、重连与房间关闭。
+- 工作流通过 actionlint（含 ShellCheck）；实际执行配置准备步骤并读取导出的 `COMPOSE_FILE`，通过迁移后的构建配置和临时镜像覆盖配置启动独立测试项目，三个服务健康且协议检查通过。
+- 项目名及 Redis 命名数据卷保持不变。测试后清理独立容器和数据卷，并核对原有 8088 服务的容器 ID、启动时间均未改变。
+
+本次未修改应用代码或 Dockerfile，未重新执行完整应用编译和浏览器测试；运行验证使用已发布镜像，源码构建路径通过 Compose 配置解析验证。文档中的配置路径与章节链接均已检查。
 
 ## 本次新增：可配置的 memory / redis 存储（2026-09-15）
 
@@ -13,7 +35,7 @@
 - 直接运行打包后的 JAR，以 `STORAGE_MODE` 选择模式：内存模式在 Redis 地址不可用时正常运行，达到配置的房间数上限后返回 HTTP 503 / `SERVICE_UNAVAILABLE`，已有房间可继续访问；重启后旧房间返回 `ROOM_NOT_FOUND`，可以重新建房。
 - 独立临时 Redis 实例验证后端重启后仍保留房间身份、局次和原手牌；恢复时玩家先标记离线，重新鉴权后回到原局，手牌视图保持一致。
 
-本次使用隔离的测试容器及临时 Java 进程，测试后清理，未更新原有 8088 服务或其 Redis 数据。两种模式的启动与切换命令见 [开发文档](development.md#存储模式)。
+本次使用隔离的测试容器及临时 Java 进程，测试后清理，未更新原有 8088 服务或其 Redis 数据。两种模式的启动与切换命令见 [开发文档](development.md) 中的「存储模式」章节。
 
 ## 本次调整：同一游戏连续开局跳过倒计时（2026-09-15）
 
@@ -86,8 +108,8 @@ cd backend && mvn test
 # 前端构建
 cd frontend && npm ci && npm run build
 
-# 启动整个应用（项目根目录）
-docker compose up -d --build --wait
+# 从当前源码构建并启动整个应用（项目根目录）
+docker compose --env-file docker/.env.example -f docker/docker-compose.build.yaml up -d --build --wait --wait-timeout 180
 
 # 真正的 REST / WebSocket 协议检查（项目根目录，Node >=22）
 node scripts/protocol-smoke.mjs
