@@ -1,0 +1,143 @@
+name: Build demo images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Test and publish demo images (AMD64)
+    if: github.repository == 'CoderXiaohui/jiuwan' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      IMAGE_TAG: sha-${{ github.sha }}
+      COMPOSE_PROJECT_NAME: jiuwan-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      FRONTEND_PORT: '18088'
+      REDIS_LOCAL_PORT: '26379'
+      ALLOWED_ORIGINS: http://localhost:18088,http://127.0.0.1:18088
+      E2E_BASE_URL: http://127.0.0.1:18088
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Check publishing configuration
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ ! "$DOCKERHUB_USERNAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+            echo "::error::Set the DOCKERHUB_USERNAME repository variable to your Docker Hub username."
+            exit 1
+          fi
+          if [[ -z "$DOCKERHUB_TOKEN" ]]; then
+            echo "::error::Set the DOCKERHUB_TOKEN repository secret to a Docker Hub Read & Write access token."
+            exit 1
+          fi
+          # Reuse the repository's Compose topology with the tested image tags.
+          cat > "$RUNNER_TEMP/jiuwan-ci.yml" <<'YAML'
+          services:
+            backend:
+              image: docker.io/${DOCKERHUB_USERNAME}/jiuwan-backend:${IMAGE_TAG}
+              platform: linux/amd64
+            frontend:
+              image: docker.io/${DOCKERHUB_USERNAME}/jiuwan-frontend:${IMAGE_TAG}
+              platform: linux/amd64
+          YAML
+          export COMPOSE_FILE="docker-compose.yml:$RUNNER_TEMP/jiuwan-ci.yml"
+          printf 'COMPOSE_FILE=%s\n' "$COMPOSE_FILE" >> "$GITHUB_ENV"
+          docker compose config --quiet
+
+      - name: Set up Node.js for protocol checks
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # The existing Dockerfiles run Maven tests and the frontend type check/build.
+      # Load both images locally so the exact images being published are tested.
+      - name: Build backend and run Maven tests
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./backend
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: docker.io/${{ env.DOCKERHUB_USERNAME }}/jiuwan-backend:${{ env.IMAGE_TAG }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=jiuwan-backend-amd64
+          cache-to: type=gha,mode=max,scope=jiuwan-backend-amd64
+
+      - name: Build frontend and check TypeScript
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./frontend
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: docker.io/${{ env.DOCKERHUB_USERNAME }}/jiuwan-frontend:${{ env.IMAGE_TAG }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=jiuwan-frontend-amd64
+          cache-to: type=gha,mode=max,scope=jiuwan-frontend-amd64
+
+      - name: Start isolated test stack
+        id: start
+        run: |
+          docker compose up \
+            -d --no-build --wait --wait-timeout 180
+
+      - name: Check live REST and WebSocket behavior
+        timeout-minutes: 2
+        run: node scripts/protocol-smoke.mjs
+
+      # No push runs until BOTH images have built and the live checks have passed.
+      - name: Publish tested images
+        run: |
+          docker push "docker.io/$DOCKERHUB_USERNAME/jiuwan-backend:$IMAGE_TAG"
+          docker push "docker.io/$DOCKERHUB_USERNAME/jiuwan-frontend:$IMAGE_TAG"
+
+      # A failed or partial push must not produce a successful publication summary.
+      - name: Show published image version
+        run: |
+          {
+            printf '## Published demo images\n\n'
+            printf '| 配置 | 值 |\n| --- | --- |\n'
+            printf '| DOCKERHUB_USERNAME | %s |\n' "$DOCKERHUB_USERNAME"
+            printf '| IMAGE_TAG | %s |\n' "$IMAGE_TAG"
+            printf '\n- 前端：docker.io/%s/jiuwan-frontend:%s\n' "$DOCKERHUB_USERNAME" "$IMAGE_TAG"
+            printf '- 后端：docker.io/%s/jiuwan-backend:%s\n' "$DOCKERHUB_USERNAME" "$IMAGE_TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show service logs on failure
+        if: ${{ failure() && steps.start.outcome != 'skipped' }}
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail 200
+
+      - name: Remove isolated CI containers and data
+        if: ${{ always() && steps.start.outcome != 'skipped' }}
+        run: docker compose down --volumes --remove-orphans
