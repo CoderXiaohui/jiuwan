@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Java-21-orange.svg" alt="Java 21" />
   <img src="https://img.shields.io/badge/Spring%20Boot-3.5.16-6DB33F.svg" alt="Spring Boot 3.5.16" />
   <img src="https://img.shields.io/badge/Vue-3.5-4FC08D.svg" alt="Vue 3.5" />
