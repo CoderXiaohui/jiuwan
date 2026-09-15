@@ -129,7 +129,7 @@ jobs:
             printf '| DOCKERHUB_USERNAME | %s |\n' "$DOCKERHUB_USERNAME"
             printf '| IMAGE_TAG | %s |\n' "$IMAGE_TAG"
             printf '\n- 前端：docker.io/%s/jiuwan-frontend:%s\n' "$DOCKERHUB_USERNAME" "$IMAGE_TAG"
-            printf '- 后端：docker.io/%s/jiuwan-backend:%s\n' "$DOCKERHUB_USERNAME" "$IMAGE_TAG"
+            printf -- '- 后端：docker.io/%s/jiuwan-backend:%s\n' "$DOCKERHUB_USERNAME" "$IMAGE_TAG"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show service logs on failure
