@@ -16,6 +16,7 @@ services:
   backend:
     build: ./backend
     environment:
+      STORAGE_MODE: redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8088,http://127.0.0.1:8088}

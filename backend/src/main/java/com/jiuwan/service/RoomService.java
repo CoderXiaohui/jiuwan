@@ -269,6 +269,7 @@ public class RoomService {
       }
       if (room.getStatus() == Room.Status.PLAYING
           && !room.getGameState().isComplete()
+          && room.getGameState().getDeadline() > 0
           && now >= room.getGameState().getDeadline()) {
         gameTick.accept(room);
         changed = true;

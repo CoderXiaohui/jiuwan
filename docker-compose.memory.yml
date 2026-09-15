@@ -1,0 +1,19 @@
+name: jiuwan
+services:
+  backend:
+    build: ./backend
+    environment:
+      STORAGE_MODE: memory
+      MEMORY_MAX_ROOMS: ${MEMORY_MAX_ROOMS:-1000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8088,http://127.0.0.1:8088}
+    expose:
+      - "8080"
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-8088}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

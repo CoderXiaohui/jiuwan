@@ -1,50 +1,40 @@
 package com.jiuwan.repository;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jiuwan.domain.Room;
-import java.time.Duration;
 import java.util.*;
-import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.*;
 import org.springframework.stereotype.Repository;
 
 @Repository
-@RequiredArgsConstructor
+@ConditionalOnProperty(name = "jiuwan.storage.mode", havingValue = "redis", matchIfMissing = true)
 public class RedisRoomRepository implements RoomRepository {
   private final StringRedisTemplate redis;
-  private final ObjectMapper mapper;
+  private final RoomSnapshotCodec codec;
   private static final String PREFIX = "jiuwan:room:";
 
-  private Duration ttl(Room room) {
-    return Duration.ofMinutes(room.getStatus() == Room.Status.CLOSED ? 15 : 360);
-  }
-
-  private String encode(Room room) {
-    try {
-      return mapper.writeValueAsString(room);
-    } catch (JsonProcessingException e) {
-      throw new IllegalStateException(e);
-    }
+  public RedisRoomRepository(StringRedisTemplate redis, ObjectMapper mapper) {
+    this.redis = redis;
+    this.codec = new RoomSnapshotCodec(mapper);
   }
 
   public Room find(String code) {
-    String value = redis.opsForValue().get(PREFIX + code);
-    if (value == null) return null;
-    try {
-      return mapper.readValue(value, Room.class);
-    } catch (JsonProcessingException e) {
-      throw new IllegalStateException(e);
-    }
+    return codec.decode(redis.opsForValue().get(PREFIX + code));
   }
 
   public boolean create(Room room) {
     return Boolean.TRUE.equals(
-        redis.opsForValue().setIfAbsent(PREFIX + room.getRoomCode(), encode(room), ttl(room)));
+        redis
+            .opsForValue()
+            .setIfAbsent(
+                PREFIX + room.getRoomCode(), codec.encode(room), RoomSnapshotCodec.ttl(room)));
   }
 
   public void save(Room room) {
-    redis.opsForValue().set(PREFIX + room.getRoomCode(), encode(room), ttl(room));
+    redis
+        .opsForValue()
+        .set(PREFIX + room.getRoomCode(), codec.encode(room), RoomSnapshotCodec.ttl(room));
   }
 
   public Set<String> codes() {

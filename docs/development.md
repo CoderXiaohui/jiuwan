@@ -4,7 +4,7 @@
 
 ## Docker 部署
 
-需要 Docker Engine / Docker Desktop 与 Compose v2。在项目根目录执行：
+需要 Docker Engine / Docker Desktop 与 Compose v2。在项目根目录执行（默认 Redis 模式）：
 
 ```bash
 docker compose up -d --build
@@ -19,6 +19,37 @@ docker compose down              # 停止；保留 Redis 数据卷
 ```
 
 已有镜像后可直接 `docker compose up -d`。修改代码后使用 `--build`。
+
+### 存储模式
+
+| 模式 | Docker 服务 | 后端重启后 | 适用场景 |
+| --- | --- | --- | --- |
+| `redis`（默认） | 前端、后端、Redis | 可从 Redis 快照恢复未过期房间 | 长期运行 |
+| `memory` | 前端、后端 | 所有房间、身份及本局状态清空 | 临时聚会、本地开发 |
+
+无 Redis 部署使用独立 Compose 文件，**不与默认文件叠加**：
+
+```bash
+docker compose -f docker-compose.memory.yml up -d --build
+docker compose -f docker-compose.memory.yml ps              # 两个服务应为 healthy
+docker compose -f docker-compose.memory.yml logs -f backend
+docker compose -f docker-compose.memory.yml down
+```
+
+两种模式使用相同的访问端口和游戏协议，均支持后端持续运行期间的页面刷新与断网重连。内存模式不会创建 Redis 客户端，也不会执行 Redis 健康探测。Redis 模式连接失败时仍报错，不自动切换为内存。
+
+同一部署切换模式时，先用**原来的 Compose 文件**执行 `down`，再用目标文件执行 `up -d --build`。例如从默认 Redis 切到内存：
+
+```bash
+docker compose down
+docker compose -f docker-compose.memory.yml up -d --build
+```
+
+切换会断开当前连接，**两种存储之间不迁移房间数据**。`down` 不加 `-v` 会保留 Redis 数据卷；切回 Redis 时可能恢复其中尚未过期的旧房间。内存模式停止后，原内存房间无法恢复。
+
+直接运行 Java / Maven 时用 `STORAGE_MODE=memory` 或 `STORAGE_MODE=redis` 选择，默认 `redis`；也支持 Spring 属性 `jiuwan.storage.mode`。不支持的模式值会使启动失败。Docker 的模式由所选 Compose 文件固定，修改 `.env` 中的 `STORAGE_MODE` 不会切换 Compose 服务。
+
+内存模式默认最多保存 **1000 个未过期房间**（包括关闭后保留的房间），可用环境变量 `MEMORY_MAX_ROOMS` 或 Spring 属性 `jiuwan.storage.memory-max-rooms` 配置正整数。Docker 可在 `.env` 中设置 `MEMORY_MAX_ROOMS=500`。达到上限时拒绝新建，返回 HTTP 503 / `SERVICE_UNAVAILABLE`，已有房间仍可继续操作，不会被驱逐。此上限控制房间数，不代表固定内存字节数。
 
 ### 两台手机一起玩
 
@@ -44,8 +75,8 @@ Nginx 转发原始 Host，WebSocket 支持同源访问，所以同一入口的�
 
 - 前端：Vue 3、TypeScript strict、Vite、Pinia、Vue Router、Tailwind CSS、原生 WebSocket；无大型 UI 框架。
 - 后端：Java 21、Spring Boot 3.5.16、Spring Web / WebSocket / Data Redis、Jackson、Lombok、Maven。
-- 状态：服务端权威计算，Redis 保存整个房间快照。前端只发操作。
-- 部署：Nginx + 单实例 Spring Boot + Redis 7.4，前后端同源代理。
+- 状态：服务端权威计算，Redis 或进程内存保存整个房间快照。前端只发操作。
+- 部署：Nginx + 单实例 Spring Boot，Redis 7.4 可选，前后端同源代理。
 - 游戏：Spring 自动注入 `List<GameEngine>`，`GameRegistry` 自动发现策略；前端按目录自动懒加载游戏组件。
 
 ```mermaid
@@ -54,8 +85,8 @@ flowchart LR
     B[手机 B · Vue] <-->|REST / WebSocket| N
     N --> R[房间服务 · 身份 / 房主 / 生命周期]
     R --> G[GameRegistry / GameEngine]
-    G --> V[ZhaJinHua / Vote / Dice / Roulette / Truth / Compatibility]
-    R <--> D[(Redis 房间快照)]
+    G --> V[ZhaJinHua / BigSmall / Vote / Dice / Roulette / Truth / Compatibility]
+    R <--> D[(Redis / 内存房间快照)]
     G --> E[GameEvent]
     E --> P[房间层挑战文案]
     R --> W[逐玩家生成私有视图并广播]
@@ -83,9 +114,9 @@ jiuwan/
 │   │   ├── controller/      REST 路由、统一异常处理
 │   │   ├── service/         房间、身份、游戏编排、事件展示、定时维护
 │   │   ├── game/            引擎接口、上下文、注册表、游戏状态与事件
-│   │   │   └── impl/        六个引擎实现
+│   │   │   └── impl/        七个引擎实现
 │   │   ├── websocket/       连接绑定、鉴权、心跳、广播
-│   │   ├── repository/      Redis 快照读写
+│   │   ├── repository/      Redis / 内存快照读写
 │   │   └── config/          WebSocket 来源限制、请求限速
 │   ├── src/main/resources/questions/   JSON 题库
 │   ├── src/test/            后端业务测试
@@ -93,14 +124,15 @@ jiuwan/
 ├── docs/                    开发部署、游戏规则、协议与验证记录
 ├── scripts/                 真实协议检查、可选的局域网入口
 ├── docker-compose.yml
+├── docker-compose.memory.yml
 └── README.md
 ```
 
 ## 本地开发
 
-需要 **JDK 21、Maven 3.9+、Node.js 22.12+（或 Node 24）、npm、Docker**。
+需要 **JDK 21、Maven 3.9+、Node.js 22.12+（或 Node 24）、npm**；用 Docker 启动 Redis 时另需 Docker。内存模式的本地开发无需 Docker。
 
-### 1. 启动 Redis
+### 1. 启动 Redis（内存模式跳过）
 
 ```bash
 docker compose up -d redis
@@ -117,7 +149,15 @@ REDIS_PORT=16379 mvn spring-boot:run
 
 后端监听 `http://localhost:8080`，健康检查 `http://localhost:8080/actuator/health`。
 
-若使用自己的 Redis，可设置 `REDIS_HOST` 和 `REDIS_PORT`。无 Redis 时后端不会回退到模拟数据。请避免开发后端和 Docker 后端同时连接同一份 Redis 数据。
+若使用自己的 Redis，可设置 `REDIS_HOST` 和 `REDIS_PORT`。请避免开发后端和 Docker 后端同时连接同一份 Redis 数据。
+
+无需 Redis 的内存模式，在 `backend` 目录执行：
+
+```bash
+STORAGE_MODE=memory mvn spring-boot:run
+```
+
+运行打包后的后端也可使用 `STORAGE_MODE=memory java -jar target/jiuwan-0.1.0.jar`。端口及前端代理配置保持相同。
 
 ### 3. 启动前端
 
@@ -142,21 +182,21 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-端到端测试要求 Redis、后端、Vite 已启动。验证 Docker 生产入口：
+端到端测试要求后端、Vite 已启动；只有 Redis 模式需要启动 Redis。验证 Docker 生产入口（两种存储模式均可）：
 
 ```bash
 cd frontend
 E2E_BASE_URL=http://localhost:8088 npm run test:e2e
 ```
 
-后端测试覆盖房间创建 / 加入 / 容量、身份伪造、房主权限与转移、断线恢复、并发重复操作、陈旧局次、插件注册、投票保密与并列、超时结算、骰子两种规则、默契分、轮盘与真心话权限、题库数量。浏览器测试使用两个独立上下文，覆盖六款游戏、刷新、网络断开恢复、房主转移，以及 375 / 390 / 430 / 1440px 布局。
+后端测试覆盖房间创建 / 加入 / 容量、身份伪造、房主权限与转移、断线恢复、并发重复操作、陈旧局次、插件注册、投票保密与并列、超时结算、骰子两种规则、默契分、轮盘与真心话权限、题库数量，以及两款牌类游戏的发牌、个人视图和回合流程。浏览器测试使用两个或三个独立上下文，覆盖七款游戏、刷新、网络断开恢复、房主转移，以及 375 / 390 / 430 / 1440px 布局。
 
 ## 核心设计决策
 
 ### 房间与身份
 
 - 创建房间先预留昵称“派对发起人”与玩家身份，再进入昵称页面；未完成昵称也可凭原身份刷新恢复。
-- `playerId` 与 WebSocket session 无关。服务端生成 256-bit 随机 `playerToken`，浏览器存入 `localStorage`，Redis 只保存 SHA-256 摘要。
+- `playerId` 与 WebSocket session 无关。服务端生成 256-bit 随机 `playerToken`，浏览器存入 `localStorage`，服务端存储只保存 SHA-256 摘要。
 - Token 仅通过 REST 返回一次和 WebSocket `RECONNECT` 消息传输，不放在 URL、广播或日志中。
 - 一个玩家同一时间使用一个活动连接；新连接替换旧连接，旧页面会明确显示提示。不同玩家应使用不同设备、浏览器或独立浏览器上下文。
 - 昵称 1–16 字符，Emoji 固定白名单；房间容量默认 12，房主可设置 2–20。
@@ -168,24 +208,30 @@ E2E_BASE_URL=http://localhost:8088 npm run test:e2e
 
 `GameEngine` 接收操作，生成状态与事件。随机源使用服务端 `SecureRandom`。投票只在全部投完或 45 秒到期后公布统计；骰子 / 默契测试等限时 60 秒。开始前统一 3 秒倒计时，服务器拒绝提前提交。已过截止时间的操作也会拒绝，后台维护器负责结算。
 
-每个房间的变更在进程内锁下完成：读快照 → 鉴权 → 校验 → 修改 → 写 Redis → 广播。`requestId` 按玩家在房间内去重，最多保留最近 256 个；引擎额外阻止一位玩家重复操作。`gameId + instanceId` 拒绝旧游戏或旧局的延迟操作。状态 `version` 单调递增，前端忽略旧版本。版本可能跳号（例如心跳更新），客户端接收的是完整快照，不依赖增量消息。
+大的喝小的喝使用 `deadline: 0` 表示不限时，动作校验和后台维护器均跳过截止时间检查。只有当前房主的 `END_ROUND` 才会结束本轮并亮牌，保持房间为 `PLAYING`，供下一局或返回大厅；该游戏不生成输赢、积分或挑战事件。
+
+每个房间的变更在进程内锁下完成：读快照 → 鉴权 → 校验 → 修改 → 保存快照 → 广播。`requestId` 按玩家在房间内去重，最多保留最近 256 个；引擎额外阻止一位玩家重复操作。`gameId + instanceId` 拒绝旧游戏或旧局的延迟操作。状态 `version` 单调递增，前端忽略旧版本。版本可能跳号（例如心跳更新），客户端接收的是完整快照，不依赖增量消息。
 
 私有 `privateChoices` 从不直接序列化给客户端。`getPlayerView` 只加上当前玩家的 `myChoice` / `hasActed`。投票结束也不会泄露投票者对应关系，除非房间主动关闭匿名投票。默契测试若只有一个答案而超时，取消该轮并保持答案私密。炸金花的 `ZhaJinHuaState` 只保存在服务端。看牌前，自己的手牌也不会下发；看牌后只通过个人视图发送。结束时只公开未弃牌者的手牌，弃牌者的牌始终对他人保密。
+
+大的喝小的喝将完整发牌结果保存在 `GameState.bigSmall`，不使用会回传 `myChoice` 的 `privateChoices`。每轮从 52 张牌中随机、不重复地给每位在线玩家发 1 张，按本轮参与者顺序展示。结束前个人视图只包含其他参与者的牌，本人座位省略 `card`；公共视图和未参与本轮的身份不展示任何牌面。结束后所有视图公开全部牌。刷新、Redis 恢复及重连沿用同一份发牌结果；每轮重新洗牌，允许与上一轮偶然发到相同牌。
 
 ### 事件与挑战分离
 
 引擎只生成 `GameEvent`（胜者、败者、选中玩家、挑战玩家、全体玩家等）。`GameEventPresenter` 根据 `RoomSettings.punishmentMode` 生成“自选挑战 / 真心话 / 自选小任务”文案。引擎只记录酒局规则开关，饮酒文案仍由展示层生成。炸金花每局输家统一为 1 小口，虚拟积分不映射饮酒量。
 
-默认安全模式开启，题库保持轻松。炸金花默认酒局模式：每位输家 1 小口，可换饮料或跳过；可在房间设置单独关闭酒局模式，改用房间挑战方式。其他游戏仍使用原挑战方式。所有挑战都可自愿跳过，由房主开始下一局。
+默认安全模式开启，题库保持轻松。炸金花默认酒局模式：每位输家 1 小口，可换饮料或跳过；可在房间设置单独关闭酒局模式，改用房间挑战方式。大的喝小的喝只负责发牌和亮牌，其余游戏仍使用原挑战方式。所有挑战都可自愿跳过，由房主开始下一局。
 
-### Redis 与运行边界
+### 房间存储与运行边界
 
-使用单个键 `jiuwan:room:{roomCode}` 保存 Room（含玩家、令牌摘要、设置、私有游戏状态、事件、去重记录），便于一次 `SET` 原子提交完整状态，不产生多个键 TTL 或更新不一致问题。房间人数很少，鉴权在最多 20 人中查找摘要，第一版无需额外 Token 索引。
+两种模式都通过 `RoomRepository` 保存完整 Room（含玩家、令牌摘要、设置、私有游戏状态、事件、去重记录）。Redis 使用单个键 `jiuwan:room:{roomCode}`，一次 `SET` 原子提交完整状态。内存使用独立的 JSON 快照，读写对象与已提交状态隔离，操作校验失败不会泄露部分修改。两种实现共用序列化和过期规则。房间人数很少，鉴权在最多 20 人中查找摘要，第一版无需额外 Token 索引。
 
 - 未关闭房间 TTL 6 小时，合法操作 / 心跳刷新 TTL。
 - 关闭后保留 15 分钟用于识别过期访问。
+- 内存模式读到过期房间时立即删除，每分钟额外清理无人访问的过期快照；新建房间达到容量上限时先清理过期项。
 - 所有人离线 30 分钟后自动关闭；连接超过 65 秒未发心跳视为离线。
 - Redis AOF 持久化与命名数据卷；启动时用 `SCAN` 恢复未关闭房间，将所有玩家标记离线，等待各自重新鉴权，保留本局状态。
+- 内存模式重启后从空存储开始，旧房间访问返回 `ROOM_NOT_FOUND`，需要重新建房。
 - 单实例适合 MVP。**不能直接水平扩容多个后端共享同一份房间键**：扩容需要房间分区 / 分布式事务与 Redis Pub/Sub 广播。当前部署明确只启一个后端。
 - Redis 设置 256 MB 上限与 `noeviction`，容量满时显式报错，不静默驱逐进行中的房间。
 
@@ -193,7 +239,7 @@ E2E_BASE_URL=http://localhost:8088 npm run test:e2e
 
 WebSocket 心跳每 20 秒一次；1 / 2 / 4 / 8 / 10 秒指数退避自动重连，成功后发送 `RECONNECT` 并恢复完整房间及个人视图。支持 `online`、`offline`、`visibilitychange`，用于锁屏、切后台和网络切换。等待中的操作若断线会提示检查最新状态，不会盲目重放。
 
-提供移动大按钮、Emoji 头像、加入过渡、3 秒倒计时、投票结果动画、骰子动画、按服务器索引定位的轮盘动画、排行榜动画，并遵从减少动态效果的系统偏好。游戏组件懒加载。
+提供移动大按钮、Emoji 头像、加入过渡、投票结果动画、骰子动画、按服务器索引定位的轮盘动画、排行榜动画，并遵从减少动态效果的系统偏好。首次开局或切换游戏时显示 3 秒倒计时；连续两局为同一游戏时直接开始，返回大厅后重开同一游戏也跳过倒计时。游戏组件懒加载。
 
 PWA 使用 manifest、图标与离线提示页；动态 API、身份与游戏状态不写入 Service Worker 缓存。离线时不能继续计算游戏结果，恢复网络后重连。当前二维码入口按需求预留，第一版可复制链接或房间码邀请。
 
@@ -210,7 +256,7 @@ PWA 使用 manifest、图标与离线提示页；动态 API、身份与游戏状
 | GET | `/api/rooms/{code}` | `Authorization: Bearer <token>` | 当前玩家安全视图 |
 | GET | `/api/games` | 无身份 | 已注册游戏列表 |
 | POST | `/api/rooms/{code}/games/{gameId}/start` | Bearer token + `{ requestId }`，房主 | 开始并返回快照 |
-| GET | `/actuator/health` | 无身份 | 服务及 Redis 健康状态 |
+| GET | `/actuator/health` | 无身份 | 服务健康状态；Redis 模式额外检查 Redis |
 
 房间设置、踢人、结束游戏和游戏动作统一走 WebSocket。REST 按来源 IP 每分钟最多 120 次；WebSocket 每连接每秒最多 20 条、单条最多 8 KB，未鉴权连接会清理。
 

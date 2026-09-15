@@ -2,14 +2,17 @@ import { test, expect, type Page } from '@playwright/test'
 const waitReady = async (page: Page) => {
   await expect(page.getByRole('button', { name: '连接状态：已连接', exact: true })).toBeVisible()
 }
-const start = async (page: Page, game: string) => {
+const start = async (page: Page, game: string, countdown = true) => {
   await page
     .locator('.lobby-game')
     .filter({ has: page.getByRole('heading', { name: game, exact: true }) })
     .click()
   await page.getByRole('button', { name: `开始游戏 · ${game}`, exact: true }).click()
   await expect(page.locator('.game-stage')).toBeVisible()
-  await expect(page.locator('.countdown-overlay')).toHaveCount(0)
+  if (countdown) await expect(page.locator('.countdown-overlay')).toBeVisible()
+  await expect(page.locator('.countdown-overlay')).toHaveCount(0, {
+    timeout: countdown ? 5000 : 1000,
+  })
 }
 test('two players play all five games, refresh, reconnect, and transfer ownership', async ({
   browser,
@@ -51,7 +54,19 @@ test('two players play all five games, refresh, reconnect, and transfer ownershi
   await owner.screenshot({ path: 'test-results/vote-mobile.png', fullPage: true })
   await owner.getByRole('button', { name: '下一局', exact: true }).click()
   await expect(guest.getByText('ROUND 02', { exact: true })).toBeVisible()
-  await expect(owner.locator('.countdown-overlay')).toHaveCount(0)
+  for (const page of [owner, guest]) {
+    await expect(page.locator('.countdown-overlay')).toHaveCount(0, { timeout: 1000 })
+    await expect(page.locator('.player-choice').first()).toBeEnabled({ timeout: 1000 })
+  }
+  await owner.locator('.player-choice').filter({ hasText: '老王' }).click()
+  await guest.locator('.player-choice').filter({ hasText: '小辉' }).click()
+  await expect(owner.getByText('大家的选择，揭晓！')).toBeVisible()
+  await owner.getByRole('button', { name: '返回大厅 · 换个游戏' }).click()
+  await start(owner, '匿名投票', false)
+  await expect(guest.locator('.countdown-overlay')).toHaveCount(0, { timeout: 1000 })
+  await expect(owner.locator('.player-choice').first()).toBeEnabled({ timeout: 1000 })
+  await owner.locator('.player-choice').filter({ hasText: '老王' }).click()
+  await expect(owner.getByText('你的选择已锁定，等待大家投票')).toBeVisible()
   await owner.getByRole('button', { name: '返回大厅 · 换个游戏' }).click()
   await start(owner, '摇骰子')
   await expect(guest.locator('.countdown-overlay')).toHaveCount(0)

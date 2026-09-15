@@ -14,6 +14,7 @@ public class GameState {
   private List<String> participants = new ArrayList<>();
   private Map<String, String> privateChoices = new LinkedHashMap<>();
   private ZhaJinHuaState zhaJinHua;
+  private BigSmallState bigSmall;
   private Map<String, Object> publicData = new LinkedHashMap<>();
   private List<GameEvent> events = new ArrayList<>();
 }

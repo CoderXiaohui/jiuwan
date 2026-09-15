@@ -21,4 +21,7 @@ management:
     health:
       show-details: never
 jiuwan:
+  storage:
+    mode: ${STORAGE_MODE:redis}
+    memory-max-rooms: ${MEMORY_MAX_ROOMS:1000}
   allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088}

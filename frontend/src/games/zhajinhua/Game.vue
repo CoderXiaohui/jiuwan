@@ -5,7 +5,7 @@ import { useGameStore } from '../../stores/game'
 import { useRoomStore } from '../../stores/room'
 import { useUserStore } from '../../stores/user'
 import { useAction } from '../../lib/useAction'
-import PlayingCards from './PlayingCards.vue'
+import PlayingCards from '../../components/PlayingCards.vue'
 import type { PokerView } from '../../lib/types'
 
 const games = useGameStore(),

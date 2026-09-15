@@ -13,6 +13,17 @@ export const catalog: GameMeta[] = [
     maxPlayers: 17,
   },
   {
+    id: 'big-small',
+    name: '大的喝小的喝',
+    english: 'EVERY CARD BUT YOURS',
+    tag: '看得见别人，猜不透自己',
+    description: '别人的牌都看得见，你的那张是秘密。',
+    rule: '去掉大小王，每人随机发 1 张不重复的牌。你只能看到别人的牌，自己的牌在房主点击“结束本轮”后揭晓。本轮不限时，怎么玩由大家约定，系统只负责发牌和亮牌。',
+    color: 'gold',
+    icon: 'poker',
+    duration: '不限时',
+  },
+  {
     id: 'vote',
     name: '匿名投票',
     english: 'WHO’S THE ONE',

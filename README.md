@@ -16,7 +16,7 @@
 
 <p align="center">
   无需注册 · 无需下载 · 6 位房间码加入 · 手机电脑一起玩<br/>
-  炸金花 · 匿名投票 · 真心话 / 大冒险 · 幸运轮盘 · 摇骰子 · 默契测试
+  炸金花 · 大的喝小的喝 · 匿名投票 · 真心话 / 大冒险 · 幸运轮盘 · 摇骰子 · 默契测试
 </p>
 
 <p align="center">
@@ -36,11 +36,12 @@
 
 ## 有什么好玩的？
 
-目前有六款游戏，从轻松破冰到手气对决，换个玩法就能接着玩。
+目前有七款游戏，从轻松破冰到手气对决，换个玩法就能接着玩。
 
 | 游戏 | 怎么玩 |
 | --- | --- |
 | 🃏 **炸金花** | 每人三张牌，选择闷牌、看牌、跟注或比牌，拼手气也拼胆量。支持 2–17 人，使用每局重置的虚拟积分。 |
+| 🙈 **大的喝小的喝** | 去掉大小王，每人随机发一张牌，只能看别人的。房主结束本轮后全部亮牌，不限时，玩法由大家约定，系统只负责发牌和亮牌。 |
 | 🗳️ **匿名投票** | “谁最有可能……？”悄悄投出你的一票，一起揭晓大家心中的那个人。 |
 | 💬 **真心话 / 大冒险** | 随机选一位朋友，抽一张真心话或大冒险卡，聊点平时没聊过的。 |
 | 🎡 **幸运轮盘** | 转动轮盘，把下一轮的挑战交给运气决定。 |
@@ -59,9 +60,11 @@
 
 ## 界面预览
 
-![酒玩首页：六款聚会游戏与房间入口](docs/screenshots/home-desktop.png)
+![酒玩首页：聚会游戏与房间入口](docs/screenshots/home-desktop.png)
 
 更多截图：[手机首页](docs/screenshots/home-mobile.png) · [手机牌桌](docs/screenshots/zhajinhua-mobile.png) · [桌面牌桌](docs/screenshots/zhajinhua-desktop.png) · [牌局结算](docs/screenshots/zhajinhua-result.png)
+
+大的喝小的喝：[手机牌桌](docs/screenshots/big-small-mobile.png) · [桌面牌桌](docs/screenshots/big-small-desktop.png) · [全部亮牌](docs/screenshots/big-small-revealed.png)
 
 ## 三步开玩
 
@@ -81,6 +84,14 @@ docker compose up -d --build
 
 首次启动需要下载依赖并构建，完成后打开 **[http://localhost:8088](http://localhost:8088)**。
 
+默认使用 Redis 保存房间，支持后端重启后恢复。临时聚会也可以选择**纯内存模式，无需 Redis**：
+
+```bash
+docker compose -f docker-compose.memory.yml up -d --build
+```
+
+内存模式支持正常游戏、刷新和断网重连，但**后端重启或更新后房间会清空**。两种模式的切换步骤和容量配置见 [开发与部署](docs/development.md#存储模式)。
+
 想让手机一起加入：
 
 1. 手机和运行项目的电脑连接同一个 Wi-Fi。
@@ -91,7 +102,7 @@ docker compose up -d --build
 
 ## 了解更多
 
-项目使用 **Vue 3 + TypeScript** 构建界面，**Spring Boot + Redis** 管理房间和游戏状态，通过 **WebSocket** 同步多人操作，支持 Docker 部署。
+项目使用 **Vue 3 + TypeScript** 构建界面，**Spring Boot** 管理房间和游戏状态，可选 **Redis / 内存存储**，通过 **WebSocket** 同步多人操作，支持 Docker 部署。
 
 - [开发与部署](docs/development.md)：运行项目、技术架构和添加新游戏。
 - [炸金花规则](docs/zhajinhua-rules.md)：牌型、比牌方式与本桌约定。

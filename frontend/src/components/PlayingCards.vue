@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import type { PokerCard } from '../../lib/types'
-defineProps<{ cards?: PokerCard[]; compact?: boolean }>()
+import type { PokerCard } from '../lib/types'
+withDefaults(defineProps<{ cards?: PokerCard[]; compact?: boolean; count?: number }>(), {
+  count: 3,
+})
 const suits = { spades: '♠', hearts: '♥', clubs: '♣', diamonds: '♦' }
 const ranks: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' }
 </script>
 <template>
-  <div class="poker-cards" :class="{ compact }" :aria-label="cards ? '已亮出的三张牌' : '三张暗牌'">
+  <div
+    class="poker-cards"
+    :class="{ compact }"
+    :aria-label="cards ? `已亮出的 ${cards.length} 张牌` : `${count} 张暗牌`"
+  >
     <template v-if="cards">
       <div
         v-for="(card, index) in cards"
@@ -26,7 +32,7 @@ const ranks: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' }
       </div>
     </template>
     <template v-else>
-      <div v-for="n in 3" :key="n" class="poker-card card-back"><span>✦</span></div>
+      <div v-for="n in count" :key="n" class="poker-card card-back"><span>✦</span></div>
     </template>
   </div>
 </template>
@@ -51,6 +57,9 @@ const ranks: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' }
 }
 .poker-card:last-child {
   transform: rotate(6deg) translateY(3px);
+}
+.poker-card:only-child {
+  transform: none;
 }
 .face {
   background: #fff5de;

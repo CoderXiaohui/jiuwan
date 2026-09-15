@@ -23,27 +23,35 @@ public abstract class AbstractGameEngine implements GameEngine {
   }
 
   private void prepare(GameContext context, int round) {
+    String previousGameId =
+        context.state() == null ? context.room().getLastGameId() : context.state().getGameId();
     GameState state = new GameState();
     state.setGameId(gameId());
     state.setRound(round);
     state.setInstanceId(UUID.randomUUID().toString());
-    state.setStartsAt(System.currentTimeMillis() + 3000);
+    state.setStartsAt(System.currentTimeMillis() + (gameId().equals(previousGameId) ? 0 : 3000));
     state.setDeadline(state.getStartsAt() + 60000);
     state.setParticipants(
         context.players().stream().filter(Player::isConnected).map(Player::getPlayerId).toList());
     require(state.getParticipants().size() >= 2, "NEED_PLAYERS", "至少需要两位在线玩家");
     context.room().setGameState(state);
     initialize(context);
+    context.room().setLastGameId(gameId());
   }
 
   protected abstract void initialize(GameContext context);
 
   protected void validate(GameContext c, Player p, String actual, String expected) {
-    require(!c.state().isComplete(), "ROUND_FINISHED", "这一轮已经结束");
-    require(System.currentTimeMillis() >= c.state().getStartsAt(), "COUNTDOWN", "倒计时结束后再操作");
-    require(System.currentTimeMillis() < c.state().getDeadline(), "ROUND_EXPIRED", "本轮时间已到，正在揭晓结果");
+    validateRound(c);
     require(c.state().getParticipants().contains(p.getPlayerId()), "NOT_PARTICIPANT", "你不是本轮参与者");
     require(expected.equals(actual), "INVALID_ACTION", "不支持的游戏操作");
+  }
+
+  protected void validateRound(GameContext c) {
+    require(!c.state().isComplete(), "ROUND_FINISHED", "这一轮已经结束");
+    require(System.currentTimeMillis() >= c.state().getStartsAt(), "COUNTDOWN", "倒计时结束后再操作");
+    require(c.state().getDeadline() == 0 || System.currentTimeMillis() < c.state().getDeadline(),
+        "ROUND_EXPIRED", "本轮时间已到，正在揭晓结果");
   }
 
   protected void choose(GameContext c, Player p, String value) {

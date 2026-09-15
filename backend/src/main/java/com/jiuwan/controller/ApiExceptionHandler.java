@@ -18,6 +18,7 @@ public class ApiExceptionHandler {
           case "INVALID_PLAYER" -> HttpStatus.UNAUTHORIZED;
           case "OWNER_ONLY" -> HttpStatus.FORBIDDEN;
           case "RATE_LIMIT" -> HttpStatus.TOO_MANY_REQUESTS;
+          case "SERVICE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
           default -> HttpStatus.BAD_REQUEST;
         };
     return ResponseEntity.status(status).body(ApiResponse.fail(e.getCode(), e.getMessage()));

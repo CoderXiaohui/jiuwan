@@ -34,6 +34,7 @@ type Command = {
 |---|---|---|
 | START_GAME | 房主，至少 2 人在线 | `gameId` |
 | END_GAME | 房主 | 结束当前游戏，回到选择界面 |
+| END_ROUND | 大的喝小的喝的当前房主 | 当前 `gameId: "big-small"`、`instanceId`，`data: {}`；结束本轮并公开全部牌，保留牌桌 |
 | NEXT_ROUND | 房主且已结算 | 当前 `gameId`、`instanceId` |
 | UPDATE_PROFILE | 本人 | `{ nickname, avatar }` |
 | UPDATE_SETTINGS | 房主且非游戏中 | 完整 RoomSettings |
@@ -103,6 +104,8 @@ type Envelope = {
 
 游戏基础字段：`gameId, instanceId, round, complete, startsAt, deadline, participants, submittedCount, hasActed, myChoice?`。
 
+`deadline` 为正数时是服务端截止时间戳；`0` 表示不限时，客户端不显示剩余秒数，服务端不触发超时结束。`startsAt` 为服务端允许操作的开始时间：房间首次开局或切换游戏时为当前时间加 3 秒；与上一局游戏相同时为当前时间，直接开始，包括 `NEXT_ROUND` 和返回大厅后重新开始同一游戏。各游戏的操作时限仍从 `startsAt` 起算。
+
 公开附加字段由游戏定义：
 
 - Vote：`question`，结束后 `counts, selectedIds`。匿名模式不提供 `ballots`。
@@ -126,6 +129,18 @@ type Envelope = {
 
 禁止直接序列化 `GameState.zhaJinHua`。完整规则见 [炸金花规则](zhajinhua-rules.md)。
 
+### 大的喝小的喝个人视图
+
+`gameId: "big-small"`，额外返回 `game.bigSmall.seats[]`：
+
+- 每个座位包含 `playerId` 和可选的 `card`，按本轮 `participants` 顺序排列。牌面格式为 `{ rank: 2..14, suit: "spades" | "hearts" | "clubs" | "diamonds" }`。
+- 未结束时，参与者只能收到别人的 `card`，自己的座位只含 `playerId`，不提供 `myChoice` 或任何自己的牌面副本；公共视图和非本轮参与者均不提供任何 `card`。
+- 当前房主在倒计时结束后发送 `END_ROUND`，令 `complete: true`，所有座位的 `card` 向所有人公开。房主即使不在本轮参与者中，也可结束本轮。房主离线后按房间原有宽限转移权限。
+- `deadline: 0`，没有超时亮牌；`submittedCount: 0`、`hasActed: false` 不作为提交进度展示。没有牌力排序、输赢、积分或挑战事件。
+- `END_ROUND` 使用通用 `gameId + instanceId` 校验及 `requestId` 幂等机制；同一请求重复发送不会重复执行，新请求结束已完成的本轮返回 `ROUND_FINISHED`。完成后可由房主 `NEXT_ROUND` 重新洗牌，或 `END_GAME` 清空游戏并返回大厅。
+
+完整牌面仅存于服务端 `GameState.bigSmall.cards`，禁止将该对象或映射直接下发。REST、WebSocket、ACK 和重连均使用相同的个人视图生成逻辑。退出 / 踢人仍中止游戏并清空牌桌，不会自动亮牌。
+
 `myChoice` 只包含当前玩家自己的操作。禁止广播整个 Domain Object 或 `privateChoices`。
 
 ## 状态与错误
@@ -145,7 +160,7 @@ type Envelope = {
 - `NOT_YOUR_TURN` / `STALE_TURN` / `PLAYER_OUT`：炸金花非本人行动、行动序号过期或已出局。
 - `COMPARE_ONLY` / `STAKE_LIMIT` / `TOO_MANY_PLAYERS`：炸金花进入决胜阶段、底分封顶或在线超过 17 人。
 - `RATE_LIMIT`：短时间消息过多。
-- `SERVICE_UNAVAILABLE`：Redis 或服务暂时不可用，可稍后重试。
+- `SERVICE_UNAVAILABLE`：Redis / 服务暂时不可用，或内存模式房间容量已满，可稍后重试。
 - `SESSION_REPLACED`：同一身份的新页面已接管连接，停止自动重连。
 
 ## 重连与动画

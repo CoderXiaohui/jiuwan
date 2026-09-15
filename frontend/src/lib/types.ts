@@ -35,6 +35,9 @@ export interface PokerSeat {
   handType?: string
   netPoints?: number
 }
+export interface BigSmallView {
+  seats: { playerId: string; card?: PokerCard }[]
+}
 export interface PokerView {
   currentPlayerId: string
   turnNumber: number
@@ -81,6 +84,7 @@ export interface GameView {
   mode?: string
   ballots?: Record<string, string>
   poker?: PokerView
+  bigSmall?: BigSmallView
 }
 export interface Room {
   roomId: string

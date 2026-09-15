@@ -10,11 +10,13 @@ import com.jiuwan.dto.RoomView;
 import com.jiuwan.exception.BusinessException;
 import com.jiuwan.game.*;
 import com.jiuwan.game.impl.*;
-import com.jiuwan.repository.RoomRepository;
+import com.jiuwan.repository.MemoryRoomRepository;
 import com.jiuwan.service.*;
 import java.util.*;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class PlatformTest {
   private final ObjectMapper mapper = new ObjectMapper();
@@ -40,46 +42,15 @@ class PlatformTest {
                 new RouletteGameEngine(random),
                 new TruthGameEngine(random, bank),
                 new CompatibilityGameEngine(random, bank),
-                new ZhaJinHuaGameEngine(random)));
-    rooms = new RoomService(new MemoryRepository(), identity, random, event -> {});
+                new ZhaJinHuaGameEngine(random),
+                new BigSmallGameEngine(random)));
+    rooms = new RoomService(new MemoryRoomRepository(mapper, 1000), identity, random, event -> {});
     games = new GameService(rooms, registry, mapper, identity);
     views = new RoomViewService(rooms, identity, registry, new GameEventPresenter());
     owner = rooms.create(new Requests.Profile("小辉", "😎"));
     guest = rooms.join(owner.roomCode(), new Requests.Profile("老王", "🐼"));
     rooms.reconnect(owner.roomCode(), owner.playerToken());
     rooms.reconnect(owner.roomCode(), guest.playerToken());
-  }
-
-  class MemoryRepository implements RoomRepository {
-    final Map<String, String> db = new ConcurrentHashMap<>();
-
-    public Room find(String code) {
-      try {
-        return db.containsKey(code) ? mapper.readValue(db.get(code), Room.class) : null;
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-
-    String encode(Room room) {
-      try {
-        return mapper.writeValueAsString(room);
-      } catch (Exception e) {
-        throw new RuntimeException(e);
-      }
-    }
-
-    public boolean create(Room room) {
-      return db.putIfAbsent(room.getRoomCode(), encode(room)) == null;
-    }
-
-    public void save(Room room) {
-      db.put(room.getRoomCode(), encode(room));
-    }
-
-    public Set<String> codes() {
-      return db.keySet();
-    }
   }
 
   private void start(String id) {
@@ -114,6 +85,127 @@ class PlatformTest {
 
   private Map<String, Object> game(RoomView.Credentials player) {
     return views.get(owner.roomCode(), player.playerToken()).game();
+  }
+
+  private void finishRound(String gameId) {
+    switch (gameId) {
+      case "vote" -> {
+        act(owner, "VOTE", Map.of("targetPlayerId", guest.playerId()));
+        act(guest, "VOTE", Map.of("targetPlayerId", owner.playerId()));
+      }
+      case "dice" -> {
+        act(owner, "SHAKE_DICE", Map.of());
+        act(guest, "SHAKE_DICE", Map.of());
+      }
+      case "roulette" -> {
+        act(owner, "SPIN", Map.of());
+        if (Boolean.TRUE.equals(game(owner).get("needsSelection")))
+          act(owner, "SELECT_PLAYER", Map.of("targetPlayerId", guest.playerId()));
+      }
+      case "truth" -> {
+        var selected = (List<?>) game(owner).get("selectedIds");
+        act(selected.contains(owner.playerId()) ? owner : guest, "DRAW", Map.of("type", "truth"));
+      }
+      case "compatibility" -> {
+        Object answer = ((List<?>) game(owner).get("options")).getFirst();
+        act(owner, "ANSWER", Map.of("answer", answer));
+        act(guest, "ANSWER", Map.of("answer", answer));
+      }
+      case "zhajinhua" -> {
+        var poker = mapper.valueToTree(game(owner)).get("poker");
+        var current = poker.get("currentPlayerId").asText();
+        act(
+            current.equals(owner.playerId()) ? owner : guest,
+            "FOLD",
+            Map.of("turnNumber", poker.get("turnNumber").asInt()));
+      }
+      case "big-small" -> act(owner, "END_ROUND", Map.of());
+      default -> fail("Missing countdown coverage for " + gameId);
+    }
+    assertEquals(true, game(owner).get("complete"));
+  }
+
+  private void assertStartWindow(long before, long after, long delay) {
+    long startsAt = (long) game(owner).get("startsAt");
+    assertTrue(startsAt >= before + delay && startsAt <= after + delay);
+    assertEquals(startsAt, game(guest).get("startsAt"));
+    long duration =
+        switch ((String) game(owner).get("gameId")) {
+          case "vote" -> 45000;
+          case "zhajinhua" -> 30000;
+          case "big-small" -> 0;
+          default -> 60000;
+        };
+    assertEquals(duration == 0 ? 0L : startsAt + duration, game(owner).get("deadline"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"vote", "dice", "roulette", "truth", "compatibility", "zhajinhua", "big-small"})
+  void countdownOnlyAppliesToFirstGameOrGameChanges(String gameId) {
+    long before = System.currentTimeMillis();
+    games.start(owner.roomCode(), owner.playerToken(), gameId, "first");
+    assertStartWindow(before, System.currentTimeMillis(), 3000);
+    assertEquals(
+        "COUNTDOWN", assertThrows(BusinessException.class, () -> finishRound(gameId)).getCode());
+
+    rooms.mutate(
+        owner.roomCode(),
+        room -> {
+          room.getGameState().setStartsAt(0);
+          // Existing persisted rooms can lack lastGameId and still skip the next-round countdown.
+          room.setLastGameId(null);
+          return null;
+        },
+        null);
+    finishRound(gameId);
+    String previousInstance = (String) game(owner).get("instanceId");
+    before = System.currentTimeMillis();
+    act(owner, "NEXT_ROUND", Map.of());
+    assertStartWindow(before, System.currentTimeMillis(), 0);
+    assertEquals(2, game(owner).get("round"));
+    assertNotEquals(previousInstance, game(owner).get("instanceId"));
+    finishRound(gameId);
+
+    act(owner, "END_GAME", Map.of());
+    assertNull(game(owner));
+    rooms.disconnect(owner.roomCode(), guest.playerId());
+    rooms.reconnect(owner.roomCode(), guest.playerToken());
+    before = System.currentTimeMillis();
+    games.start(owner.roomCode(), owner.playerToken(), gameId, "same-from-lobby");
+    assertStartWindow(before, System.currentTimeMillis(), 0);
+    assertEquals(1, game(owner).get("round"));
+    finishRound(gameId);
+
+    act(owner, "END_GAME", Map.of());
+    String otherGameId = "dice".equals(gameId) ? "vote" : "dice";
+    before = System.currentTimeMillis();
+    games.start(owner.roomCode(), owner.playerToken(), otherGameId, "different-game");
+    assertStartWindow(before, System.currentTimeMillis(), 3000);
+    act(owner, "END_GAME", Map.of());
+    before = System.currentTimeMillis();
+    games.start(owner.roomCode(), owner.playerToken(), gameId, "switch-back");
+    assertStartWindow(before, System.currentTimeMillis(), 3000);
+    assertEquals(
+        "COUNTDOWN", assertThrows(BusinessException.class, () -> finishRound(gameId)).getCode());
+  }
+
+  @Test
+  void failedStartDoesNotChangePreviousGame() {
+    start("dice");
+    act(owner, "END_GAME", Map.of());
+    rooms.disconnect(owner.roomCode(), guest.playerId());
+    assertEquals(
+        "NEED_PLAYERS",
+        assertThrows(
+                BusinessException.class,
+                () -> games.start(owner.roomCode(), owner.playerToken(), "vote", "failed-start"))
+            .getCode());
+    rooms.reconnect(owner.roomCode(), guest.playerToken());
+    long before = System.currentTimeMillis();
+    games.start(owner.roomCode(), owner.playerToken(), "dice", "retry-same-game");
+    assertStartWindow(before, System.currentTimeMillis(), 0);
+    finishRound("dice");
   }
 
   @Test
@@ -215,8 +307,9 @@ class PlatformTest {
   }
 
   @Test
-  void registryDiscoversSixPluginsAndRejectsDuplicates() {
-    assertEquals(6, registry.list().size());
+  void registryDiscoversSevenPluginsAndRejectsDuplicates() {
+    assertEquals(7, registry.list().size());
+    assertEquals("大的喝小的喝", registry.get("big-small").gameName());
     assertThrows(BusinessException.class, () -> registry.get("poker"));
     var engine = new DiceGameEngine(random);
     assertThrows(IllegalStateException.class, () -> new GameRegistry(List.of(engine, engine)));
@@ -346,9 +439,107 @@ class PlatformTest {
     act(guest, "COMPARE", Map.of("turnNumber", 2, "targetPlayerId", owner.playerId()));
     assertEquals(true, game(owner).get("complete"));
     act(owner, "NEXT_ROUND", Map.of());
-    assertEquals("STALE_ACTION", assertThrows(BusinessException.class,
-        () -> games.command(owner.roomCode(), owner.playerToken(),
-            command("zhajinhua", instance, "CALL", Map.of("turnNumber", 1), "old-poker-call"))).getCode());
+    assertEquals(
+        "STALE_ACTION",
+        assertThrows(
+                BusinessException.class,
+                () ->
+                    games.command(
+                        owner.roomCode(),
+                        owner.playerToken(),
+                        command(
+                            "zhajinhua",
+                            instance,
+                            "CALL",
+                            Map.of("turnNumber", 1),
+                            "old-poker-call")))
+            .getCode());
+  }
+
+  @Test
+  void bigSmallPersistsPrivateViewsAndEndRequestsAreIdempotentAndBoundToTheRound() {
+    start("big-small");
+    String instance = (String) game(owner).get("instanceId");
+    var ownerView = mapper.valueToTree(game(owner));
+    var guestView = mapper.valueToTree(game(guest));
+    assertFalse(ownerView.at("/bigSmall/seats/0").has("card"));
+    assertTrue(ownerView.at("/bigSmall/seats/1").has("card"));
+    assertFalse(guestView.at("/bigSmall/seats/1").has("card"));
+    assertTrue(guestView.at("/bigSmall/seats/0").has("card"));
+    rooms.disconnect(owner.roomCode(), owner.playerId());
+    rooms.reconnect(owner.roomCode(), owner.playerToken());
+    assertEquals(ownerView, mapper.valueToTree(game(owner)));
+    assertEquals(
+        "ROUND_ACTIVE",
+        assertThrows(BusinessException.class, () -> act(owner, "NEXT_ROUND", Map.of())).getCode());
+    assertEquals(
+        "OWNER_ONLY",
+        assertThrows(BusinessException.class, () -> act(guest, "END_ROUND", Map.of())).getCode());
+    var end = command("big-small", instance, "END_ROUND", Map.of(), "end-round");
+    games.command(owner.roomCode(), owner.playerToken(), end);
+    long version = views.get(owner.roomCode(), owner.playerToken()).version();
+    games.command(owner.roomCode(), owner.playerToken(), end);
+    assertEquals(version, views.get(owner.roomCode(), owner.playerToken()).version());
+    assertEquals(true, game(owner).get("complete"));
+    assertEquals(game(owner), game(guest));
+    var revealed = mapper.valueToTree(game(owner));
+    assertEquals(guestView.at("/bigSmall/seats/0/card"), revealed.at("/bigSmall/seats/0/card"));
+    assertEquals(ownerView.at("/bigSmall/seats/1/card"), revealed.at("/bigSmall/seats/1/card"));
+    assertTrue(views.get(owner.roomCode(), owner.playerToken()).events().isEmpty());
+    act(owner, "NEXT_ROUND", Map.of());
+    assertEquals(false, game(owner).get("complete"));
+    assertFalse(mapper.valueToTree(game(owner)).at("/bigSmall/seats/0").has("card"));
+    assertEquals(
+        "STALE_ACTION",
+        assertThrows(
+                BusinessException.class,
+                () ->
+                    games.command(
+                        owner.roomCode(),
+                        owner.playerToken(),
+                        command("big-small", instance, "END_ROUND", Map.of(), "stale-end")))
+            .getCode());
+    act(owner, "END_GAME", Map.of());
+    assertNull(game(owner));
+  }
+
+  @Test
+  void bigSmallMaintenanceSkipsTimeoutAndAllowsManualEndAfterSixtySeconds() {
+    start("big-small");
+    long now = System.currentTimeMillis() + 70000;
+    rooms.mutate(
+        owner.roomCode(),
+        room -> {
+          room.getPlayers().values().forEach(p -> p.setLastSeen(now));
+          return null;
+        },
+        null);
+    rooms.maintain(owner.roomCode(), now, room -> fail("Untimed game must never be ticked"));
+    assertEquals(false, game(owner).get("complete"));
+    assertEquals(0L, game(owner).get("deadline"));
+    act(owner, "END_ROUND", Map.of());
+    assertEquals(true, game(owner).get("complete"));
+  }
+
+  @Test
+  void bigSmallNewOwnerCanRevealEvenWhenNotDealtIntoTheRound() {
+    var spectator = rooms.join(owner.roomCode(), new Requests.Profile("阿琳", "🦊"));
+    start("big-small");
+    rooms.reconnect(owner.roomCode(), spectator.playerToken());
+    var spectatorView = mapper.valueToTree(game(spectator));
+    assertFalse(spectatorView.at("/bigSmall/seats/0").has("card"));
+    assertFalse(spectatorView.at("/bigSmall/seats/1").has("card"));
+    rooms.disconnect(owner.roomCode(), owner.playerId());
+    rooms.disconnect(owner.roomCode(), guest.playerId());
+    rooms.maintain(owner.roomCode(), System.currentTimeMillis() + 16000, games::timeout);
+    assertEquals(
+        spectator.playerId(), views.get(owner.roomCode(), spectator.playerToken()).ownerId());
+    assertEquals(
+        "OWNER_ONLY",
+        assertThrows(BusinessException.class, () -> act(owner, "END_ROUND", Map.of())).getCode());
+    act(spectator, "END_ROUND", Map.of());
+    assertEquals(true, game(spectator).get("complete"));
+    assertEquals(game(owner), game(spectator));
   }
 
   @Test

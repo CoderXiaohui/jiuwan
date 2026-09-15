@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
-import { ArrowRight, CheckCheck, Clock, LogOut, ShieldCheck } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { ArrowRight, CheckCheck, Clock, EyeOff, LogOut, ShieldCheck } from 'lucide-vue-next'
 import { useGameStore } from '../stores/game'
 import { useRoomStore } from '../stores/room'
 import { useWebSocketStore } from '../stores/websocket'
@@ -12,6 +12,12 @@ const games = useGameStore(),
   ws = useWebSocketStore(),
   { busy, act } = useAction()
 const now = ref(Date.now())
+watch(
+  () => games.view?.instanceId,
+  () => {
+    now.value = Date.now()
+  },
+)
 const timer = setInterval(() => {
   now.value = Date.now()
 }, 200)
@@ -38,11 +44,16 @@ const meta = computed(() => catalog.find((g) => g.id === games.view?.gameId))
         <CheckCheck :size="16" />
         本轮已揭晓
       </span>
+      <span v-else-if="!countdown && games.view.deadline === 0">
+        <EyeOff :size="16" />
+        等待房主结束本轮
+      </span>
       <span v-else>
         <Clock :size="16" />
         {{ countdown ? '准备开始' : `${games.view.poker ? '本次行动' : '剩余'} ${remaining} 秒` }}
       </span>
-      <span v-if="games.view.poker">
+      <span v-if="games.view.bigSmall">{{ games.view.participants.length }} 人参与</span>
+      <span v-else-if="games.view.poker">
         {{
           games.view.poker.seats.filter((s) => s.status === 'active' || s.status === 'winner')
             .length
