@@ -44,6 +44,7 @@ public class RoomViewService {
               code,
               room.getOwnerId(),
               room.getStatus().name(),
+              room.getSelectedGameId(),
               room.getCurrentGameId(),
               room.getCreatedAt(),
               room.getGameStateVersion(),

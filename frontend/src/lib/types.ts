@@ -91,6 +91,7 @@ export interface Room {
   roomCode: string
   ownerId: string
   status: string
+  selectedGameId: string
   currentGameId?: string
   createdAt: number
   version: number

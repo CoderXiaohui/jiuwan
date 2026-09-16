@@ -17,8 +17,10 @@ public class RoomController {
   private final GameService games;
 
   @PostMapping("/rooms")
-  public ApiResponse<?> create(@Valid @RequestBody Requests.Profile profile) {
-    return ApiResponse.ok(rooms.create(profile));
+  public ApiResponse<?> create(@Valid @RequestBody Requests.CreateRoom request) {
+    return ApiResponse.ok(
+        rooms.create(
+            new Requests.Profile(request.nickname(), request.avatar()), request.selectedGameId()));
   }
 
   @PostMapping("/rooms/{code}/join")

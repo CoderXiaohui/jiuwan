@@ -114,7 +114,7 @@ docker compose -f docker-compose.build.memory.yaml up -d --build --wait --wait-t
 2. 查看电脑局域网 IP，例如 `192.168.1.23`。
 3. 两部手机都打开 `http://192.168.1.23:8088`，允许系统防火墙访问 8088 端口。
 4. A 创建房间，填写昵称并进入；B 输入房间码加入。
-5. A 选择游戏并开始，双方自动进入同一局。刷新或恢复网络后会重连。
+5. A 选择游戏，双方大厅同步显示已选游戏；开始后自动进入同一局。刷新或恢复网络后会重连并恢复当前选择。
 
 **OrbStack 仅开放 localhost 的情况：** 如果电脑能访问 localhost，但 Wi-Fi IP 连接被拒绝，可在项目根目录另开终端运行项目自带的局域网入口：
 
@@ -312,7 +312,7 @@ PWA 使用 manifest、图标与离线提示页；动态 API、身份与游戏状
 
 | 方法 | 路径 | 请求 / 身份 | 返回 |
 |---|---|---|---|
-| POST | `/api/rooms` | `{ nickname, avatar }` | `roomCode, playerId, playerToken` |
+| POST | `/api/rooms` | `{ nickname, avatar, selectedGameId? }`，省略游戏时默认 `vote` | `roomCode, playerId, playerToken` |
 | POST | `/api/rooms/{code}/join` | `{ nickname, avatar }` | 同上 |
 | GET | `/api/rooms/{code}` | 无身份 | 仅房间状态 / 人数 / 容量 |
 | GET | `/api/rooms/{code}` | `Authorization: Bearer <token>` | 当前玩家安全视图 |

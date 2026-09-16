@@ -20,36 +20,40 @@ import { api } from '../lib/api'
 import type { Credentials, GameMeta } from '../lib/types'
 import { useUserStore } from '../stores/user'
 import { useWebSocketStore } from '../stores/websocket'
-import { useGameStore } from '../stores/game'
+import { useRoomStore } from '../stores/room'
 const user = useUserStore(),
   ws = useWebSocketStore(),
-  games = useGameStore(),
+  rooms = useRoomStore(),
   router = useRouter()
 const busy = ref(false),
   selected = ref<GameMeta | null>(null)
-async function createRoom() {
-  if (user.credentials) {
-    await router.push(`/room/${user.credentials.roomCode}`)
-    return
-  }
+async function createRoom(selectedGameId?: string) {
+  if (busy.value) return
   busy.value = true
   try {
+    if (user.credentials) {
+      if (selectedGameId && rooms.isOwner && rooms.room?.status !== 'PLAYING')
+        await ws.send('SELECT_GAME', {}, selectedGameId)
+      await router.push(`/room/${user.credentials.roomCode}`)
+      return
+    }
     const session = await api<Credentials>('/rooms', {
       nickname: user.nickname || '派对发起人',
       avatar: user.avatar,
+      selectedGameId,
     })
     user.save(session)
     await router.push('/profile')
   } catch (e) {
-    ws.error = e instanceof Error ? e.message : '创建失败，请重试'
+    ws.error = e instanceof Error ? e.message : '操作失败，请重试'
   } finally {
     busy.value = false
   }
 }
 async function playSelected() {
-  if (selected.value) games.selectedId = selected.value.id
+  const gameId = selected.value?.id
   selected.value = null
-  await createRoom()
+  await createRoom(gameId)
 }
 </script>
 <template>
@@ -78,7 +82,7 @@ async function playSelected() {
           一个房间，一群朋友，无限种快乐。
         </p>
         <div class="hero-actions">
-          <button class="button primary" :disabled="busy" @click="createRoom">
+          <button class="button primary" :disabled="busy" @click="createRoom()">
             <Plus :size="21" />
             {{ busy ? '正在创建…' : user.credentials ? '回到我的房间' : '创建房间' }}
             <ArrowUpRight :size="19" />

@@ -12,6 +12,8 @@
 
 相同身份的新连接替换旧连接；旧连接收到 `SESSION_REPLACED`，停止重连，但可主动重新连接。切换浏览器或设备时原 localStorage 不会自动同步，应使用新玩家加入。
 
+创建房间 `POST /api/rooms` 接受 `{ nickname, avatar, selectedGameId? }`。省略或传入 `null` 时默认选择 `vote`；提供游戏 ID 时必须是已注册的游戏，否则返回 `INVALID_GAME`，不会创建房间。该选择随房间保存，首页“就玩这个”通过此字段预选游戏。加入房间的请求仍为 `{ nickname, avatar }`。
+
 ## 客户端消息
 
 通用结构：
@@ -32,6 +34,7 @@ type Command = {
 
 | action | 权限 | data / 其他字段 |
 |---|---|---|
+| SELECT_GAME | 房主且非游戏中 | 顶层 `gameId`，不需要 `instanceId`；只更新大厅选择，不开局 |
 | START_GAME | 房主，至少 2 人在线 | `gameId` |
 | END_GAME | 房主 | 结束当前游戏，回到选择界面 |
 | END_ROUND | 大的喝小的喝的当前房主 | 当前 `gameId: "big-small"`、`instanceId`，`data: {}`；结束本轮并公开全部牌，保留牌桌 |
@@ -82,7 +85,7 @@ type Envelope = {
 
 - `ROOM_CREATED`：创建事件（通常此时创建者尚未连接，身份由 REST 返回）。
 - `PLAYER_JOINED` / `PLAYER_LEFT` / `PLAYER_RECONNECTED`：成员变化。
-- `ROOM_STATE_UPDATE`：离线、房主自动转移、定时超时等房间变化。
+- `ROOM_STATE_UPDATE`：大厅游戏选择、离线、房主自动转移、定时超时等房间变化。
 - `GAME_STARTED`：开始游戏，包含 `startsAt` 倒计时。
 - `GAME_STATE_UPDATE`：动作后的玩家视图。
 - `GAME_RESULT`：游戏动作完成结算；定时器结算也可通过 `ROOM_STATE_UPDATE` 的 `game.complete` 判断。
@@ -98,7 +101,11 @@ type Envelope = {
 
 ## RoomView 和私有信息
 
-`RoomView`：`roomId, roomCode, ownerId, status, currentGameId, createdAt, version, players, settings, game, events`。
+`RoomView`：`roomId, roomCode, ownerId, status, selectedGameId, currentGameId, createdAt, version, players, settings, game, events`。
+
+`selectedGameId` 是服务端保存的大厅已选游戏，默认 `vote`。所有玩家通过 REST、WebSocket 广播、ACK 和重连快照读取同一选择。房主发送 `SELECT_GAME` 后等待服务端快照确认，等待期间禁止继续切换或开始游戏；非房主返回 `OWNER_ONLY`，游戏中返回 `GAME_IN_PROGRESS`，未知或缺少游戏 ID 返回 `INVALID_GAME`。该命令沿用 requestId 幂等和版本机制。
+
+成功 `START_GAME` 同时更新 `selectedGameId`。结束游戏、成员退出 / 被移出或房主转移后保留选择；`currentGameId` 与 `game` 仍在返回大厅时清空。只选择游戏不会改变上一局游戏记录和倒计时规则。旧房间快照缺少 `selectedGameId` 或该值为 `null` 时，按 `currentGameId`、上一局游戏、`vote` 的顺序补齐。
 
 玩家：`playerId, nickname, avatar, connected, isOwner, joinedAt, score`。**没有 Token 或 Token 摘要**。
 

@@ -17,6 +17,7 @@ public class Room {
   private String roomCode;
   private String ownerId;
   private Status status = Status.WAITING;
+  private String selectedGameId;
   private String currentGameId;
   // Most recently started game, retained when returning to the lobby.
   private String lastGameId;

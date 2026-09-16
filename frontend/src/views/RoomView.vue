@@ -49,7 +49,9 @@ const draft = ref<RoomSettings>({
   zhaJinHua235: false,
   zhaJinHuaDrink: true,
 })
-const selected = computed(() => catalog.find((g) => g.id === games.selectedId) ?? catalog[0]!)
+const selected = computed(
+  () => catalog.find((g) => g.id === rooms.room?.selectedGameId) ?? catalog[0]!,
+)
 const inviteUrl = computed(
   () => `${location.origin}/join?code=${rooms.room?.roomCode ?? route.params.code}`,
 )
@@ -221,9 +223,10 @@ async function confirm() {
               v-for="game in catalog"
               :key="game.id"
               class="lobby-game"
-              :class="[game.color, { selected: games.selectedId === game.id }]"
-              :disabled="!rooms.isOwner"
-              @click="games.selectedId = game.id"
+              :class="[game.color, { selected: rooms.room.selectedGameId === game.id }]"
+              :aria-pressed="rooms.room.selectedGameId === game.id"
+              :disabled="!rooms.isOwner || busy || ws.status !== 'connected'"
+              @click="act('SELECT_GAME', {}, game.id)"
             >
               <div class="lobby-game-art"><GameArt :kind="game.icon" /></div>
               <div>
@@ -232,7 +235,7 @@ async function confirm() {
                 <p>{{ game.description }}</p>
               </div>
               <div class="selection-circle">
-                <Check v-if="games.selectedId === game.id" :size="16" />
+                <Check v-if="rooms.room.selectedGameId === game.id" :size="16" />
               </div>
             </button>
           </div>
@@ -249,10 +252,10 @@ async function confirm() {
                 busy ||
                 ws.status !== 'connected'
               "
-              @click="act('START_GAME', {}, games.selectedId)"
+              @click="act('START_GAME', {}, rooms.room.selectedGameId)"
             >
               <Play :size="19" fill="currentColor" />
-              {{ busy ? '准备开场…' : `开始游戏 · ${selected.name}` }}
+              {{ busy ? '请稍候…' : `开始游戏 · ${selected.name}` }}
               <ArrowRight :size="19" />
             </button>
             <p>

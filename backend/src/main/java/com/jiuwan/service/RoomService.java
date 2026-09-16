@@ -4,6 +4,7 @@ import static com.jiuwan.exception.BusinessException.require;
 
 import com.jiuwan.domain.*;
 import com.jiuwan.dto.*;
+import com.jiuwan.game.GameRegistry;
 import com.jiuwan.game.RandomSource;
 import com.jiuwan.repository.RoomRepository;
 import java.util.*;
@@ -19,6 +20,7 @@ public class RoomService {
   private final RoomRepository repository;
   private final IdentityService identity;
   private final RandomSource random;
+  private final GameRegistry registry;
   private final ApplicationEventPublisher publisher;
   private final Object[] locks = new Object[128];
   private final Set<String> active = ConcurrentHashMap.newKeySet();
@@ -27,10 +29,12 @@ public class RoomService {
       RoomRepository repository,
       IdentityService identity,
       RandomSource random,
+      GameRegistry registry,
       ApplicationEventPublisher publisher) {
     this.repository = repository;
     this.identity = identity;
     this.random = random;
+    this.registry = registry;
     this.publisher = publisher;
     Arrays.setAll(locks, i -> new Object());
   }
@@ -61,6 +65,12 @@ public class RoomService {
   }
 
   public RoomView.Credentials create(Requests.Profile profile) {
+    return create(profile, null);
+  }
+
+  public RoomView.Credentials create(Requests.Profile profile, String selectedGameId) {
+    String gameId = selectedGameId == null ? "vote" : selectedGameId;
+    registry.get(gameId);
     String token = identity.token();
     Player player = identity.create(profile, token);
     for (int attempt = 0; attempt < 50; attempt++) {
@@ -70,6 +80,7 @@ public class RoomService {
         room.setRoomId(UUID.randomUUID().toString());
         room.setRoomCode(code);
         room.setOwnerId(player.getPlayerId());
+        room.setSelectedGameId(gameId);
         room.setCreatedAt(System.currentTimeMillis());
         room.setUpdatedAt(room.getCreatedAt());
         room.setGameStateVersion(1);

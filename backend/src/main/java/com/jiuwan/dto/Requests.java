@@ -9,6 +9,11 @@ public final class Requests {
   public record Profile(
       @NotBlank @Size(max = 16) String nickname, @NotBlank @Size(max = 8) String avatar) {}
 
+  public record CreateRoom(
+      @NotBlank @Size(max = 16) String nickname,
+      @NotBlank @Size(max = 8) String avatar,
+      String selectedGameId) {}
+
   public record Start(@NotBlank @Size(max = 80) String requestId) {}
 
   public record Command(

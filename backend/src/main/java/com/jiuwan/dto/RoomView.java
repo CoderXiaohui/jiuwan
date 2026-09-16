@@ -8,6 +8,7 @@ public record RoomView(
     String roomCode,
     String ownerId,
     String status,
+    String selectedGameId,
     String currentGameId,
     long createdAt,
     long version,

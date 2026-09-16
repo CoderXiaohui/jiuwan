@@ -30,6 +30,7 @@ public class GameService {
           require(room.getStatus() != Room.Status.PLAYING, "GAME_IN_PROGRESS", "请先结束当前游戏");
           var engine = registry.get(gameId);
           engine.start(new GameContext(room));
+          room.setSelectedGameId(gameId);
           room.setCurrentGameId(gameId);
           room.setStatus(Room.Status.PLAYING);
           log.info("Game started code={} game={}", code, gameId);
@@ -49,6 +50,7 @@ public class GameService {
           case "LEAVE_ROOM", "KICK_PLAYER" -> "PLAYER_LEFT";
           case "END_GAME" -> "GAME_ENDED";
           case "NEXT_ROUND" -> "GAME_CHANGED";
+          case "SELECT_GAME" -> "ROOM_STATE_UPDATE";
           default -> "GAME_STATE_UPDATE";
         };
     rooms.command(
@@ -57,6 +59,12 @@ public class GameService {
         command.requestId(),
         (room, player) -> {
           switch (action) {
+            case "SELECT_GAME" -> {
+              rooms.owner(room, player);
+              require(room.getStatus() != Room.Status.PLAYING, "GAME_IN_PROGRESS", "请返回大厅选择游戏");
+              registry.get(command.gameId());
+              room.setSelectedGameId(command.gameId());
+            }
             case "LEAVE_ROOM" -> rooms.leave(room, player, player.getPlayerId());
             case "KICK_PLAYER" ->
                 rooms.leave(

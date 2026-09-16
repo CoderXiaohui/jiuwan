@@ -44,7 +44,8 @@ class PlatformTest {
                 new CompatibilityGameEngine(random, bank),
                 new ZhaJinHuaGameEngine(random),
                 new BigSmallGameEngine(random)));
-    rooms = new RoomService(new MemoryRoomRepository(mapper, 1000), identity, random, event -> {});
+    rooms =
+        new RoomService(new MemoryRoomRepository(mapper, 1000), identity, random, registry, event -> {});
     games = new GameService(rooms, registry, mapper, identity);
     views = new RoomViewService(rooms, identity, registry, new GameEventPresenter());
     owner = rooms.create(new Requests.Profile("小辉", "😎"));
@@ -85,6 +86,123 @@ class PlatformTest {
 
   private Map<String, Object> game(RoomView.Credentials player) {
     return views.get(owner.roomCode(), player.playerToken()).game();
+  }
+
+  private void selectGame(RoomView.Credentials player, String gameId) {
+    games.command(
+        owner.roomCode(),
+        player.playerToken(),
+        command(gameId, null, "SELECT_GAME", Map.of(), UUID.randomUUID().toString()));
+  }
+
+  @Test
+  void creationSupportsInitialSelectionAndRejectsUnknownGamesBeforeCreatingRoom() {
+    assertEquals("vote", views.get(owner.roomCode(), owner.playerToken()).selectedGameId());
+    var created = rooms.create(new Requests.Profile("新房主", "😎"), "zhajinhua");
+    assertEquals("zhajinhua", views.get(created.roomCode(), created.playerToken()).selectedGameId());
+    assertNull(rooms.read(created.roomCode(), Room::getLastGameId));
+    var codes = rooms.activeCodes();
+    assertEquals(
+        "INVALID_GAME",
+        assertThrows(
+                BusinessException.class,
+                () -> rooms.create(new Requests.Profile("新房主", "😎"), "unknown"))
+            .getCode());
+    assertEquals(codes, rooms.activeCodes());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"vote", "dice", "roulette", "truth", "compatibility", "zhajinhua", "big-small"})
+  void selectionIsSharedWithLateJoinersAndSurvivesReconnectAndRecovery(String gameId) {
+    long version = views.get(owner.roomCode(), owner.playerToken()).version();
+    selectGame(owner, gameId);
+    RoomView selected = views.get(owner.roomCode(), owner.playerToken());
+    assertEquals(version + 1, selected.version());
+    assertEquals(gameId, selected.selectedGameId());
+    assertEquals("WAITING", selected.status());
+    assertNull(selected.currentGameId());
+    assertNull(selected.game());
+    assertNull(rooms.read(owner.roomCode(), Room::getLastGameId));
+    assertEquals(gameId, views.get(owner.roomCode(), guest.playerToken()).selectedGameId());
+
+    var late = rooms.join(owner.roomCode(), new Requests.Profile("迟到", "🐼"));
+    assertEquals(gameId, views.get(owner.roomCode(), late.playerToken()).selectedGameId());
+    rooms.disconnect(owner.roomCode(), guest.playerId());
+    rooms.reconnect(owner.roomCode(), guest.playerToken());
+    rooms.recover();
+    rooms.reconnect(owner.roomCode(), owner.playerToken());
+    rooms.reconnect(owner.roomCode(), guest.playerToken());
+    assertEquals(gameId, views.get(owner.roomCode(), owner.playerToken()).selectedGameId());
+    assertEquals(gameId, views.get(owner.roomCode(), guest.playerToken()).selectedGameId());
+  }
+
+  @Test
+  void duplicateSelectionCannotIncrementVersionOrUndoLaterSelection() {
+    var selection = command("zhajinhua", null, "SELECT_GAME", Map.of(), "select-once");
+    games.command(owner.roomCode(), owner.playerToken(), selection);
+    var first = views.get(owner.roomCode(), owner.playerToken());
+    games.command(owner.roomCode(), owner.playerToken(), selection);
+    assertEquals(first, views.get(owner.roomCode(), owner.playerToken()));
+    selectGame(owner, "dice");
+    var latest = views.get(owner.roomCode(), owner.playerToken());
+    games.command(owner.roomCode(), owner.playerToken(), selection);
+    assertEquals(latest, views.get(owner.roomCode(), owner.playerToken()));
+  }
+
+  @Test
+  void selectionRequiresOwnerValidGameAndLobbyWithoutChangingStateOnFailure() {
+    var initial = views.get(owner.roomCode(), owner.playerToken());
+    assertEquals(
+        "OWNER_ONLY",
+        assertThrows(BusinessException.class, () -> selectGame(guest, "zhajinhua")).getCode());
+    for (String invalid : Arrays.asList(null, "", "unknown"))
+      assertEquals(
+          "INVALID_GAME",
+          assertThrows(BusinessException.class, () -> selectGame(owner, invalid)).getCode());
+    assertEquals(initial, views.get(owner.roomCode(), owner.playerToken()));
+
+    start("zhajinhua");
+    var playing = views.get(owner.roomCode(), owner.playerToken());
+    assertEquals(
+        "GAME_IN_PROGRESS",
+        assertThrows(BusinessException.class, () -> selectGame(owner, "dice")).getCode());
+    assertEquals(playing, views.get(owner.roomCode(), owner.playerToken()));
+  }
+
+  @Test
+  void returningToLobbyKeepsSelectionAndBrowsingDoesNotChangeCountdownHistory() {
+    start("dice");
+    act(owner, "END_GAME", Map.of());
+    assertEquals("dice", views.get(owner.roomCode(), guest.playerToken()).selectedGameId());
+    selectGame(owner, "zhajinhua");
+    assertEquals("dice", rooms.read(owner.roomCode(), Room::getLastGameId));
+    selectGame(owner, "dice");
+    long before = System.currentTimeMillis();
+    games.start(owner.roomCode(), owner.playerToken(), "dice", "same-after-browsing");
+    assertStartWindow(before, System.currentTimeMillis(), 0);
+
+    act(owner, "END_GAME", Map.of());
+    selectGame(owner, "zhajinhua");
+    before = System.currentTimeMillis();
+    games.start(owner.roomCode(), owner.playerToken(), "zhajinhua", "different-after-browsing");
+    assertStartWindow(before, System.currentTimeMillis(), 3000);
+    assertEquals("zhajinhua", views.get(owner.roomCode(), guest.playerToken()).selectedGameId());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"LEAVE_ROOM", "KICK_PLAYER"})
+  void selectionSurvivesInterruptedGamesAndOwnershipTransfer(String action) {
+    start("zhajinhua");
+    act(owner, action, Map.of("targetPlayerId", guest.playerId()));
+    var remaining = "LEAVE_ROOM".equals(action) ? guest : owner;
+    var lobby = views.get(owner.roomCode(), remaining.playerToken());
+    assertEquals("WAITING", lobby.status());
+    assertNull(lobby.game());
+    assertEquals("zhajinhua", lobby.selectedGameId());
+    assertEquals(remaining.playerId(), lobby.ownerId());
+    selectGame(remaining, "dice");
+    assertEquals("dice", views.get(owner.roomCode(), remaining.playerToken()).selectedGameId());
   }
 
   private void finishRound(String gameId) {
@@ -201,6 +319,7 @@ class PlatformTest {
                 BusinessException.class,
                 () -> games.start(owner.roomCode(), owner.playerToken(), "vote", "failed-start"))
             .getCode());
+    assertEquals("dice", views.get(owner.roomCode(), owner.playerToken()).selectedGameId());
     rooms.reconnect(owner.roomCode(), guest.playerToken());
     long before = System.currentTimeMillis();
     games.start(owner.roomCode(), owner.playerToken(), "dice", "retry-same-game");
@@ -293,9 +412,13 @@ class PlatformTest {
 
   @Test
   void offlineOwnerTransfersAfterGracePeriod() {
+    selectGame(owner, "zhajinhua");
     rooms.disconnect(owner.roomCode(), owner.playerId());
     rooms.maintain(owner.roomCode(), System.currentTimeMillis() + 16000, games::timeout);
     assertEquals(guest.playerId(), views.get(owner.roomCode(), guest.playerToken()).ownerId());
+    assertEquals("zhajinhua", views.get(owner.roomCode(), guest.playerToken()).selectedGameId());
+    selectGame(guest, "dice");
+    assertEquals("dice", views.get(owner.roomCode(), owner.playerToken()).selectedGameId());
   }
 
   @Test
