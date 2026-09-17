@@ -21,6 +21,7 @@ export interface RoomSettings {
   diceRule: 'lowest' | 'highest'
   zhaJinHua235: boolean
   zhaJinHuaDrink: boolean
+  angryBirdsBombCount: number
 }
 export interface PokerCard {
   rank: number
@@ -37,6 +38,20 @@ export interface PokerSeat {
 }
 export interface BigSmallView {
   seats: { playerId: string; card?: PokerCard }[]
+}
+export interface AngryBirdsView {
+  bombCount: number
+  currentPlayerId: string
+  turnNumber: number
+  birds: { id: number; status: 'hidden' | 'flown' | 'exploded' | 'bomb' }[]
+  lastMove?: {
+    birdId: number
+    playerId: string
+    turnNumber: number
+    automatic: boolean
+    at: number
+  }
+  loserId?: string
 }
 export interface PokerView {
   currentPlayerId: string
@@ -85,6 +100,7 @@ export interface GameView {
   ballots?: Record<string, string>
   poker?: PokerView
   bigSmall?: BigSmallView
+  angryBirds?: AngryBirdsView
 }
 export interface Room {
   roomId: string

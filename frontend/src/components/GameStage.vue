@@ -50,9 +50,22 @@ const meta = computed(() => catalog.find((g) => g.id === games.view?.gameId))
       </span>
       <span v-else>
         <Clock :size="16" />
-        {{ countdown ? '准备开始' : `${games.view.poker ? '本次行动' : '剩余'} ${remaining} 秒` }}
+        {{
+          countdown
+            ? '准备开始'
+            : `${games.view.poker || games.view.angryBirds ? '本次行动' : '剩余'} ${remaining} 秒`
+        }}
       </span>
-      <span v-if="games.view.bigSmall">{{ games.view.participants.length }} 人参与</span>
+      <span v-if="games.view.angryBirds">
+        <template v-if="games.view.complete">
+          {{ games.view.angryBirds.bombCount }} 只炸弹已揭晓
+        </template>
+        <template v-else>
+          剩余
+          {{ games.view.angryBirds.birds.filter((bird) => bird.status === 'hidden').length }} 只小鸟
+        </template>
+      </span>
+      <span v-else-if="games.view.bigSmall">{{ games.view.participants.length }} 人参与</span>
       <span v-else-if="games.view.poker">
         {{
           games.view.poker.seats.filter((s) => s.status === 'active' || s.status === 'winner')

@@ -43,7 +43,8 @@ class PlatformTest {
                 new TruthGameEngine(random, bank),
                 new CompatibilityGameEngine(random, bank),
                 new ZhaJinHuaGameEngine(random),
-                new BigSmallGameEngine(random)));
+                new BigSmallGameEngine(random),
+                new AngryBirdsGameEngine(random)));
     rooms =
         new RoomService(new MemoryRoomRepository(mapper, 1000), identity, random, registry, event -> {});
     games = new GameService(rooms, registry, mapper, identity);
@@ -113,7 +114,7 @@ class PlatformTest {
 
   @ParameterizedTest
   @ValueSource(
-      strings = {"vote", "dice", "roulette", "truth", "compatibility", "zhajinhua", "big-small"})
+      strings = {"vote", "dice", "roulette", "truth", "compatibility", "zhajinhua", "big-small", "angry-birds"})
   void selectionIsSharedWithLateJoinersAndSurvivesReconnectAndRecovery(String gameId) {
     long version = views.get(owner.roomCode(), owner.playerToken()).version();
     selectGame(owner, gameId);
@@ -238,6 +239,13 @@ class PlatformTest {
             Map.of("turnNumber", poker.get("turnNumber").asInt()));
       }
       case "big-small" -> act(owner, "END_ROUND", Map.of());
+      case "angry-birds" -> {
+        var board = rooms.read(owner.roomCode(), r -> r.getGameState().getAngryBirds());
+        var display = mapper.valueToTree(game(owner)).get("angryBirds");
+        var current = display.get("currentPlayerId").asText();
+        act(current.equals(owner.playerId()) ? owner : guest, "PICK_BIRD",
+            Map.of("birdId", board.getBombIds().iterator().next(), "turnNumber", board.getTurnNumber()));
+      }
       default -> fail("Missing countdown coverage for " + gameId);
     }
     assertEquals(true, game(owner).get("complete"));
@@ -251,6 +259,7 @@ class PlatformTest {
         switch ((String) game(owner).get("gameId")) {
           case "vote" -> 45000;
           case "zhajinhua" -> 30000;
+          case "angry-birds" -> 10000;
           case "big-small" -> 0;
           default -> 60000;
         };
@@ -259,7 +268,7 @@ class PlatformTest {
 
   @ParameterizedTest
   @ValueSource(
-      strings = {"vote", "dice", "roulette", "truth", "compatibility", "zhajinhua", "big-small"})
+      strings = {"vote", "dice", "roulette", "truth", "compatibility", "zhajinhua", "big-small", "angry-birds"})
   void countdownOnlyAppliesToFirstGameOrGameChanges(String gameId) {
     long before = System.currentTimeMillis();
     games.start(owner.roomCode(), owner.playerToken(), gameId, "first");
@@ -430,8 +439,9 @@ class PlatformTest {
   }
 
   @Test
-  void registryDiscoversSevenPluginsAndRejectsDuplicates() {
-    assertEquals(7, registry.list().size());
+  void registryDiscoversEightPluginsAndRejectsDuplicates() {
+    assertEquals(8, registry.list().size());
+    assertEquals("愤怒的小鸟", registry.get("angry-birds").gameName());
     assertEquals("大的喝小的喝", registry.get("big-small").gameName());
     assertThrows(BusinessException.class, () -> registry.get("poker"));
     var engine = new DiceGameEngine(random);
@@ -675,6 +685,103 @@ class PlatformTest {
     act(guest, "SHAKE_DICE", Map.of());
     assertEquals(true, game(owner).get("complete"));
     assertFalse(((List<?>) game(owner).get("loserIds")).isEmpty());
+  }
+
+  @Test
+  void birdSettingsAreStrictOwnerOnlyAndPersistAcrossGames() {
+    assertEquals(1, views.get(owner.roomCode(), owner.playerToken()).settings().getAngryBirdsBombCount());
+    var initial = views.get(owner.roomCode(), owner.playerToken());
+    for (Object invalid : Arrays.asList(null, 0, -1, 7, 1.5, "2", true, Long.MAX_VALUE)) {
+      var settings = new HashMap<String, Object>();
+      settings.put("angryBirdsBombCount", invalid);
+      assertEquals("INVALID_SETTINGS", assertThrows(BusinessException.class,
+          () -> act(owner, "UPDATE_SETTINGS", settings)).getCode());
+      assertEquals(initial, views.get(owner.roomCode(), owner.playerToken()));
+    }
+    assertEquals("OWNER_ONLY", assertThrows(BusinessException.class,
+        () -> act(guest, "UPDATE_SETTINGS", Map.of("angryBirdsBombCount", 6))).getCode());
+    act(owner, "UPDATE_SETTINGS", Map.of("angryBirdsBombCount", 6));
+    assertEquals(6, views.get(owner.roomCode(), guest.playerToken()).settings().getAngryBirdsBombCount());
+    start("angry-birds");
+    assertEquals("GAME_IN_PROGRESS", assertThrows(BusinessException.class,
+        () -> act(owner, "UPDATE_SETTINGS", Map.of("angryBirdsBombCount", 1))).getCode());
+    finishRound("angry-birds");
+    act(owner, "NEXT_ROUND", Map.of());
+    assertEquals(6, mapper.valueToTree(game(owner)).at("/angryBirds/bombCount").asInt());
+    act(owner, "END_GAME", Map.of());
+    assertEquals(6, views.get(owner.roomCode(), guest.playerToken()).settings().getAngryBirdsBombCount());
+  }
+
+  @Test
+  void birdMovesAreIdempotentRecoverableAndBoundToInstanceAndTurn() throws Exception {
+    start("angry-birds");
+    String instance = (String) game(owner).get("instanceId");
+    var currentId = mapper.valueToTree(game(owner)).at("/angryBirds/currentPlayerId").asText();
+    var actor = owner.playerId().equals(currentId) ? owner : guest;
+    var bombs = rooms.read(owner.roomCode(), r -> r.getGameState().getAngryBirds().getBombIds());
+    int safe = java.util.stream.IntStream.range(0, 16).filter(i -> !bombs.contains(i)).findFirst().orElseThrow();
+    var command = command("angry-birds", instance, "PICK_BIRD", Map.of("birdId", safe, "turnNumber", 1), "bird-once");
+    games.command(owner.roomCode(), actor.playerToken(), command);
+    var after = views.get(owner.roomCode(), owner.playerToken());
+    games.command(owner.roomCode(), actor.playerToken(), command);
+    assertEquals(after, views.get(owner.roomCode(), owner.playerToken()));
+    assertEquals("STALE_TURN", assertThrows(BusinessException.class, () -> act(actor, "PICK_BIRD",
+        Map.of("birdId", safe, "turnNumber", 1))).getCode());
+    for (var viewer : List.of(owner, guest)) {
+      var json = mapper.valueToTree(game(viewer));
+      assertFalse(json.toString().contains("bombIds"));
+      for (int bomb : bombs) assertEquals("hidden", json.at("/angryBirds/birds/" + bomb + "/status").asText());
+    }
+    rooms.recover();
+    rooms.reconnect(owner.roomCode(), owner.playerToken());
+    rooms.reconnect(owner.roomCode(), guest.playerToken());
+    assertEquals(after.game(), game(owner));
+    finishRound("angry-birds");
+    assertEquals(game(owner), game(guest));
+    assertTrue(views.get(owner.roomCode(), owner.playerToken()).events().isEmpty());
+    act(owner, "NEXT_ROUND", Map.of());
+    assertEquals("STALE_ACTION", assertThrows(BusinessException.class, () -> games.command(owner.roomCode(),
+        actor.playerToken(), command("angry-birds", instance, "PICK_BIRD", Map.of("birdId", safe, "turnNumber", 1), "old-bird"))).getCode());
+    act(guest, "LEAVE_ROOM", Map.of());
+    assertEquals("WAITING", views.get(owner.roomCode(), owner.playerToken()).status());
+    assertNull(game(owner));
+  }
+
+  @Test
+  void expiredManualClicksAndConcurrentTicksConsumeExactlyOneBird() throws Exception {
+    start("angry-birds");
+    var currentId = mapper.valueToTree(game(owner)).at("/angryBirds/currentPlayerId").asText();
+    var actor = owner.playerId().equals(currentId) ? owner : guest;
+    rooms.mutate(owner.roomCode(), r -> {
+      r.getGameState().setDeadline(System.currentTimeMillis() - 1);
+      return null;
+    }, null);
+    var gate = new CountDownLatch(1);
+    try (var pool = Executors.newFixedThreadPool(8)) {
+      var tasks = new ArrayList<Future<?>>();
+      for (int i = 0; i < 4; i++) {
+        tasks.add(pool.submit(() -> {
+          gate.await();
+          rooms.maintain(owner.roomCode(), System.currentTimeMillis(), games::timeout);
+          return null;
+        }));
+        tasks.add(pool.submit(() -> {
+          gate.await();
+          var error = assertThrows(BusinessException.class,
+              () -> act(actor, "PICK_BIRD", Map.of("birdId", 15, "turnNumber", 1)));
+          assertTrue(List.of("ROUND_EXPIRED", "ROUND_FINISHED", "STALE_TURN").contains(error.getCode()));
+          return null;
+        }));
+      }
+      gate.countDown();
+      for (var task : tasks) task.get();
+    }
+    var state = rooms.read(owner.roomCode(), r -> r.getGameState());
+    var board = state.getAngryBirds();
+    assertEquals(1, board.getLastMove().turnNumber());
+    assertTrue(board.getLastMove().automatic());
+    assertEquals(currentId, board.getLastMove().playerId());
+    assertEquals(state.isComplete() ? 0 : 1, board.getFlownIds().size());
   }
 
   @Test

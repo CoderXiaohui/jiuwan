@@ -48,6 +48,7 @@ const draft = ref<RoomSettings>({
   diceRule: 'lowest',
   zhaJinHua235: false,
   zhaJinHuaDrink: true,
+  angryBirdsBombCount: 1,
 })
 const selected = computed(
   () => catalog.find((g) => g.id === rooms.room?.selectedGameId) ?? catalog[0]!,
@@ -77,6 +78,14 @@ function requestClose() {
 }
 async function saveSettings() {
   if (await act('UPDATE_SETTINGS', { ...draft.value })) settingsOpen.value = false
+}
+async function setBombCount(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const count = Number(select.value)
+  // Keep the control on the confirmed snapshot until the server accepts the change.
+  select.value = String(rooms.room?.settings.angryBirdsBombCount ?? 1)
+  if (rooms.room)
+    await act('UPDATE_SETTINGS', { ...rooms.room.settings, angryBirdsBombCount: count })
 }
 async function copy(text: string, type: string) {
   try {
@@ -242,6 +251,20 @@ async function confirm() {
           <div class="selected-rule">
             <strong>{{ selected.name }} · 怎么玩</strong>
             <p>{{ selected.rule }}</p>
+          </div>
+          <div v-if="selected.id === 'angry-birds'" class="bird-settings">
+            <label for="bird-bomb-count">炸弹鸟数量</label>
+            <select
+              id="bird-bomb-count"
+              :value="rooms.room.settings.angryBirdsBombCount ?? 1"
+              :disabled="!rooms.isOwner || busy || ws.status !== 'connected'"
+              @change="setBombCount"
+            >
+              <option v-for="count in 6" :key="count" :value="count">{{ count }} 只</option>
+            </select>
+            <small>
+              {{ rooms.isOwner ? '16 只小鸟中，藏几只炸弹？' : '由房主设置 · 每回合 10 秒' }}
+            </small>
           </div>
           <div v-if="rooms.isOwner" class="lobby-start">
             <button

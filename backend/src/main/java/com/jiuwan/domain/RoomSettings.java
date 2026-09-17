@@ -12,4 +12,5 @@ public class RoomSettings {
   private String diceRule = "lowest";
   private boolean zhaJinHua235 = false;
   private boolean zhaJinHuaDrink = true;
+  private int angryBirdsBombCount = 1;
 }

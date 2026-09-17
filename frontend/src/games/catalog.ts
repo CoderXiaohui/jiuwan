@@ -1,6 +1,18 @@
 import type { GameMeta } from '../lib/types'
 export const catalog: GameMeta[] = [
   {
+    id: 'angry-birds',
+    name: '愤怒的小鸟',
+    english: 'LITTLE BIRDS, BIG SURPRISE',
+    tag: '下一只，会爆炸吗？',
+    description: '轮流点一只小鸟，别碰到藏着的炸弹！',
+    rule: '2–10 人参与，16 只小鸟中藏着 1–6 只炸弹鸟，由房主开局前设置。每局随机排列玩家顺序，依次点击；普通鸟飞走，炸弹鸟爆炸，游戏立即结束并揭晓全部炸弹。每回合 10 秒，超时自动随机点击，离线也不跳过。',
+    color: 'blue',
+    icon: 'bird',
+    duration: '1–3 分钟',
+    maxPlayers: 10,
+  },
+  {
     id: 'zhajinhua',
     name: '炸金花',
     english: 'THREE CARDS, ONE WINNER',

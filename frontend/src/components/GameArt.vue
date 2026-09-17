@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { Heart, MessageCircle, Sparkles, Zap, ArrowUpRight, Check } from 'lucide-vue-next'
+import BirdArt from './BirdArt.vue'
 defineProps<{ kind: string }>()
 </script>
 <template>
   <div class="game-art" :class="`art-${kind}`" aria-hidden="true">
-    <template v-if="kind === 'poker'">
+    <template v-if="kind === 'bird'">
+      <div class="bird-card-art"><BirdArt /></div>
+      <i class="art-spark">♡</i>
+    </template>
+    <template v-else-if="kind === 'poker'">
       <div class="mini-card poker-left">
         <span>A</span>
         ♠

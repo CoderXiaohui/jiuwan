@@ -52,13 +52,16 @@ type Command = {
 | ANSWER | 默契测试选中的两位玩家 | `{ answer: '给定选项之一' }` |
 | LOOK | 炸金花仍在场玩家（可非本人回合） | `{ turnNumber }` |
 | CALL / RAISE / FOLD | 炸金花当前行动玩家 | `{ turnNumber }`，RAISE 将底分加 1，服务端计算积分 |
+| PICK_BIRD | 愤怒的小鸟当前行动玩家 | `{ birdId: 0..15, turnNumber }` |
 | COMPARE | 炸金花当前行动玩家 | `{ turnNumber, targetPlayerId }` |
 
 `UPDATE_SETTINGS`：
 
 ```json
-{"punishmentMode":"challenge","gameMode":"normal","maxPlayers":12,"anonymousVote":true,"safeMode":true,"diceRule":"lowest","zhaJinHua235":false,"zhaJinHuaDrink":true}
+{"punishmentMode":"challenge","gameMode":"normal","maxPlayers":12,"anonymousVote":true,"safeMode":true,"diceRule":"lowest","zhaJinHua235":false,"zhaJinHuaDrink":true,"angryBirdsBombCount":1}
 ```
+
+`angryBirdsBombCount` 必须为 1–6 的 JSON 整数；字符串、小数、null 和越界值返回 `INVALID_SETTINGS`。省略该字段时默认 1。前端提交完整设置，等待服务端确认后才能开始游戏。
 
 心跳每 20 秒：
 
@@ -150,6 +153,21 @@ type Envelope = {
 
 `myChoice` 只包含当前玩家自己的操作。禁止广播整个 Domain Object 或 `privateChoices`。
 
+### 愤怒的小鸟视图
+
+`gameId: "angry-birds"`，2–10 位在线玩家；额外返回 `game.angryBirds`：
+
+- `bombCount`：本局炸弹数量快照；`currentPlayerId`：当前行动者；`turnNumber`：从 1 开始的行动序号。
+- `birds[]`：固定 16 项 `{ id: 0..15, status }`。结束前 status 仅为 `hidden / flown`；结束后引爆位置为 `exploded`，其余炸弹为 `bomb`，未点击的普通鸟仍为 `hidden`。
+- `lastMove?`：`{ birdId, playerId, turnNumber, automatic, at }`。`at` 为服务端操作时间戳；`automatic` 标识超时自动点击，结果归属于该玩家。
+- `loserId?`：仅在爆炸结束后提供，与最后一次点击的 `playerId` 一致。
+
+`participants` 为每局随机生成、循环使用的玩家顺序，不改变房间成员列表顺序。`deadline` 表示当前回合 10 秒期限，首回合为 `startsAt + 10000`。截止后手动操作返回 `ROUND_EXPIRED`；每秒维护任务自动随机点击一个剩余位置，安全则切换玩家、增加 `turnNumber` 并重新计时，爆炸则 `complete: true`、`deadline: 0`，停止后续点击。离线也保留回合并按时自动点击。
+
+`PICK_BIRD` 使用 `requestId` 幂等、`gameId + instanceId` 跨局保护及 `turnNumber` 跨回合保护；非本人回合返回 `NOT_YOUR_TURN`，序号过期返回 `STALE_TURN`，位置非法返回 `INVALID_BIRD`，已飞走返回 `BIRD_GONE`。`hasActed` / `submittedCount` 不用于判断轮流点击权限或展示提交进度。
+
+完整炸弹集合仅保存在服务端，禁止直接下发 `GameState.angryBirds`。REST、WebSocket、ACK 和重连统一生成安全视图。结束后揭晓全部炸弹，保留棋盘，不生成挑战事件或积分。下一局沿用数量，重新随机位置、顺序并生成新 `instanceId`；修改数量须先返回大厅。刷新、重连直接显示当前棋盘，不重播历史动画。
+
 ## 状态与错误
 
 服务端以每个房间为单位串行处理变更，版本可跳跃、不可倒退。局次 ID 不依赖整数 round：切换游戏后 round 可以重新从 1 开始，但 `instanceId` 永不复用。
@@ -164,8 +182,10 @@ type Envelope = {
 - `COUNTDOWN` / `ROUND_EXPIRED` / `ROUND_FINISHED`：不在允许操作的时间窗口。
 - `NEED_PLAYERS` / `ROOM_FULL` / `GAME_IN_PROGRESS`：人数、容量或房间阶段不满足。
 - `INVALID_TARGET` / `INVALID_ANSWER` / `INVALID_ACTION` / `INVALID_MESSAGE`：请求无效。
-- `NOT_YOUR_TURN` / `STALE_TURN` / `PLAYER_OUT`：炸金花非本人行动、行动序号过期或已出局。
-- `COMPARE_ONLY` / `STAKE_LIMIT` / `TOO_MANY_PLAYERS`：炸金花进入决胜阶段、底分封顶或在线超过 17 人。
+- `NOT_YOUR_TURN` / `STALE_TURN` / `PLAYER_OUT`：非本人行动、行动序号过期或炸金花已出局。
+- `COMPARE_ONLY` / `STAKE_LIMIT`：炸金花进入决胜阶段或底分封顶。
+- `TOO_MANY_PLAYERS`：超过游戏人数上限，炸金花为 17 人，愤怒的小鸟为 10 人。
+- `INVALID_BIRD` / `BIRD_GONE`：小鸟位置非法或已经飞走。
 - `RATE_LIMIT`：短时间消息过多。
 - `SERVICE_UNAVAILABLE`：Redis / 服务暂时不可用，或内存模式房间容量已满，可稍后重试。
 - `SESSION_REPLACED`：同一身份的新页面已接管连接，停止自动重连。

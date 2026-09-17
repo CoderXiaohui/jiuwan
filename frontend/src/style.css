@@ -2056,6 +2056,40 @@ input.code-input {
   background: transparent;
   border: 0;
 }
+.bird-card-art {
+  width: 125px;
+  height: 125px;
+  transform: rotate(-8deg);
+}
+.bird-settings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 15px;
+  border: 1px solid #506570;
+  border-radius: 12px;
+  background: #25373d;
+  color: #d8eaf1;
+  font-size: 13px;
+}
+.bird-settings select {
+  border: 1px solid #668694;
+  border-radius: 8px;
+  background: #192c33;
+  color: #f0faff;
+  padding: 8px 25px 8px 12px;
+  font: inherit;
+}
+.bird-settings small {
+  color: #a7c3ce;
+  font-size: 11px;
+}
+.lobby-game-art .bird-card-art {
+  width: 60px;
+  height: 60px;
+}
 .safe-note {
   display: flex;
   align-items: center;

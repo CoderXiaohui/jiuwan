@@ -81,6 +81,12 @@ public class GameService {
             case "UPDATE_SETTINGS" -> {
               rooms.owner(room, player);
               require(room.getStatus() != Room.Status.PLAYING, "GAME_IN_PROGRESS", "请返回大厅修改设置");
+              if (command.data() != null && command.data().containsKey("angryBirdsBombCount")) {
+                var count = mapper.valueToTree(command.data().get("angryBirdsBombCount"));
+                require(count.isIntegralNumber() && count.canConvertToInt()
+                        && count.intValue() >= 1 && count.intValue() <= 6,
+                    "INVALID_SETTINGS", "炸弹鸟数量需为 1–6 的整数");
+              }
               RoomSettings settings = mapper.convertValue(command.data(), RoomSettings.class);
               require(
                   settings.getMaxPlayers() >= 2

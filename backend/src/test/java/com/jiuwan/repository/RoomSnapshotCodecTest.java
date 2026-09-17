@@ -12,6 +12,14 @@ class RoomSnapshotCodecTest {
   private final ObjectMapper mapper = new ObjectMapper();
   private final RoomSnapshotCodec codec = new RoomSnapshotCodec(mapper);
 
+  @Test
+  void oldSettingsDefaultToOneBombAndNewSettingsPersist() {
+    assertEquals(1, codec.decode("{\"settings\":{\"maxPlayers\":12}}").getSettings().getAngryBirdsBombCount());
+    var room = new Room();
+    room.getSettings().setAngryBirdsBombCount(6);
+    assertEquals(6, codec.decode(codec.encode(room)).getSettings().getAngryBirdsBombCount());
+  }
+
   @ParameterizedTest
   @CsvSource({"zhajinhua,dice,zhajinhua", ",dice,dice", ",,vote"})
   void oldSnapshotsRestoreSelectionFromCurrentThenPreviousGame(
